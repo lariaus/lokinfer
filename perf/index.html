@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lokinfer performance</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #677085; --border: #e2e5eb;
+    --good: #15803d; --bad: #b91c1c; --warn: #b45309; --grid: #e9ecf1; --chip: #eef1f5; --chip-on: #1d2330;
+    --chip-on-text: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --card: #1a1f27; --text: #e6e9ef; --muted: #9aa3b5; --border: #2a313d;
+      --good: #4ade80; --bad: #f87171; --warn: #fbbf24; --grid: #262c37; --chip: #242a35; --chip-on: #e6e9ef;
+      --chip-on-text: #12151b;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: 8px; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--border); }
+  .dot.st-best { background: #16a34a; } .dot.st-near { background: #2563eb; }
+  .dot.st-slow { background: #ca8a04; } .dot.st-missing { background: #dc2626; }
+  .dot.st-off { background: transparent; border: 1px solid var(--muted); }
+  header { padding: 20px 24px 8px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  .sub-t { color: var(--muted); }
+  .controls { padding: 4px 24px 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .chip { border: 1px solid var(--border); background: var(--chip); color: var(--text); border-radius: 999px;
+          padding: 4px 12px; cursor: pointer; font: inherit; }
+  .chip.on { background: var(--chip-on); color: var(--chip-on-text); border-color: var(--chip-on); }
+  h2 { font-size: 16px; margin: 18px 24px 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .model-h { font-size: 18px; margin: 18px 24px 8px; display: flex; align-items: center; gap: 8px; }
+  .model-h .dot { width: 11px; height: 11px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(520px, 100%), 1fr)); gap: 16px;
+          padding: 0 24px 24px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px 12px;
+          min-width: 0; }
+  .card h3 { margin: 0; font-size: 15px; }
+  .card .desc { color: var(--muted); font-size: 12.5px; margin: 2px 0 8px; }
+  .card .overall { font-size: 13.5px; font-weight: 600; margin: 3px 0 0; }
+  .card.placeholder { min-height: 120px; }
+  .card.placeholder .nodata-msg { color: var(--muted); margin-top: 10px; }
+  /* Border = lokinfer's standing on the card (see status()): best / within 10 % / slower / missing somewhere */
+  .card.st-best { border: 2px solid #16a34a; }
+  .card.st-near { border: 2px solid #2563eb; }
+  .card.st-slow { border: 2px solid #ca8a04; }
+  .card.st-missing { border: 2px solid #dc2626; }
+  .legend { color: var(--muted); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; padding: 0 24px 6px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px;
+              vertical-align: -1px; }
+  .chart { position: relative; height: 300px; }
+  .summary { margin-top: 8px; font-size: 12.5px; display: grid; gap: 2px; }
+  .good { color: var(--good); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  .empty { padding: 40px 24px; color: var(--muted); }
+  footer { padding: 0 24px 24px; color: var(--muted); font-size: 12px; }
+  code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  @media (max-width: 600px) {
+    header, .controls { padding-left: 16px; padding-right: 16px; }
+    .grid { grid-template-columns: 1fr; padding: 0 16px 16px; }
+    h2, .model-h { margin-left: 16px; margin-right: 16px; }
+    .legend, footer { padding-left: 16px; padding-right: 16px; }
+  }
+  .model-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+  .model-h .mname { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font: inherit; }
+  .model-h .mname:hover { text-decoration: underline; }
+  .model-h .wins { margin-left: auto; font-size: 13.5px; font-weight: 500; color: var(--muted); }
+  .wins b.all { color: var(--good); } .wins b.some { color: var(--warn); } .wins b.none { color: var(--bad); }
+  .totals { margin: 4px 24px 6px; display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13.5px; align-items: baseline; }
+  .totals .tt { font-weight: 600; }
+  .totals .dev { color: var(--muted); }
+  @media (max-width: 640px) { .totals { margin-left: 16px; margin-right: 16px; } }
+  .model-h .caret { display: inline-block; width: 12px; color: var(--muted); transition: transform .12s; }
+  .model-block.collapsed .caret { transform: rotate(-90deg); }
+  .model-h .vt { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12.5px; font-weight: 400; }
+  .model-h .vchip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border);
+                    background: var(--chip); border-radius: 999px; padding: 2px 10px 2px 6px; cursor: pointer; }
+  .model-h .vchip input { margin: 0; }
+  .model-h .vchip.off { opacity: .55; }
+  .model-h .vchip .nd { color: var(--muted); font-style: italic; }
+  .model-block.collapsed .grid { display: none; }
+  .grid.one-col { grid-template-columns: 1fr; }
+</style>
+</head>
+<body>
+<header>
+  <h1>lokinfer performance</h1>
+  <span class="sub-t" id="updated">loading…</span>
+</header>
+<div class="totals" id="totals"></div>
+<div class="controls" id="controls"></div>
+<div class="legend">
+  <span><i style="background:#16a34a"></i>lokinfer best</span>
+  <span><i style="background:#2563eb"></i>within 10 % of the best</span>
+  <span><i style="background:#ca8a04"></i>more than 10 % slower</span>
+  <span><i style="background:#dc2626"></i>lokinfer missing / not working in some case (or no data yet)</span>
+  <span>— card borders and toggle dots</span>
+</div>
+<main id="main"></main>
+<footer>
+  Data: <code>perf/results.json</code> (latest value per model / device / case / implementation). Bars: time per
+  forward pass, lower is better. ⚠ = measured in Low Power Mode or on battery. Dashed markers = targets.
+  Updates appear automatically. Click a model's name to collapse / expand it (remembered per browser). See <code>docs/perf-dashboard.md</code>.
+</footer>
+<script>
+Chart.register(ChartDataLabels);
+
+const IMPL_COLORS = {
+  "torch eager": "#ee4c2c", "torch.compile": "#f59e7b", "torch MPS": "#b42318", "torch.compile MPS": "#e8899a",
+  "MLX": "#3b82f6", "CoreML": "#8b5cf6", "ONNX Runtime": "#64748b",
+  "lokinfer basic": "#86d0a0", "lokinfer fused": "#16a34a", "lokinfer GPU": "#0d9488",
+  "lokinfer": "#86d0a0", "lokinfer accelerate": "#16a34a", "lokinfer GPU basic": "#5eead4",
+};
+const FALLBACK = ["#a16207", "#7c3aed", "#0891b2", "#be185d", "#4d7c0f", "#c2410c"];
+const isLk = impl => impl.startsWith("lokinfer");
+const isTarget = impl => impl === "target";
+let fallbackIdx = 0;
+function colorOf(impl) {
+  if (!(impl in IMPL_COLORS)) IMPL_COLORS[impl] = isLk(impl) ? "#22c55e" : FALLBACK[fallbackIdx++ % FALLBACK.length];
+  return IMPL_COLORS[impl];
+}
+function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+function fmt(ms, unit) {
+  if (unit !== "ms") return `${+ms.toPrecision(3)} ${unit}`;
+  if (ms < 1) return `${+(ms * 1000).toPrecision(3)} µs`;
+  if (ms < 100) return `${+ms.toPrecision(3)} ms`;
+  return `${Math.round(ms)} ms`;
+}
+// Compact bar label (the axis title carries the unit): "2275", "112", "27.1µs".
+function fmtShort(ms, unit) {
+  if (unit !== "ms") return `${+ms.toPrecision(3)}`;
+  if (ms < 1) return `${+(ms * 1000).toPrecision(3)}µs`;
+  return ms < 100 ? `${+ms.toPrecision(3)}` : `${Math.round(ms)}`;
+}
+function caveat(e) {
+  const s = e.state || {};
+  const bits = [];
+  if (s.low_power_mode) bits.push("Low Power Mode");
+  if (s.power === "battery") bits.push("battery");
+  if (s.thermal && !["nominal", "unknown"].includes(s.thermal)) bits.push(`thermal ${s.thermal}`);
+  return bits;
+}
+
+// View state persisted across reloads (never the data itself, or a reload would skip the first render).
+// hidden[model][device] = true only after an explicit "off" toggle: everything (incl. models that appear later) is on
+// by default.
+const DEFAULT_DEVICES = ["Mac CPU", "Mac GPU", "iPhone CPU", "iPhone GPU"];
+const RANK = { best: 0, near: 1, slow: 2, missing: 3 };
+const ST_LABEL = { best: "lokinfer best", near: "within 10 % of the best", slow: "more than 10 % slower",
+                   missing: "lokinfer missing in some case", off: "all versions hidden" };
+const state = { log: false, hidden: {}, collapsed: {} };  // collapsed[model] = true after a click on its name
+let lastText = "";
+let charts = [];
+let pendingScroll = null;  // model to scroll to after the next render (hash route / menu click)
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+const isOn = (model, device) => !(state.hidden[model] && state.hidden[model][device]);
+function setOn(model, device, on) {
+  const h = state.hidden[model] || (state.hidden[model] = {});
+  if (on) delete h[device]; else h[device] = true;
+  if (!Object.keys(h).length) delete state.hidden[model];
+}
+const worst = sts => sts.reduce((w, s) => (w === null || RANK[s] > RANK[w] ? s : w), null);
+const blockId = model => "m-" + encodeURIComponent(model);
+
+// URL hash: "#/" (top) or "#/model/<encoded name>" (scroll to that model's block).
+function routeModel() {
+  const m = (typeof location !== "undefined" && location.hash || "").match(/^#\/model\/(.+)$/);
+  if (!m) return null;
+  try { return decodeURIComponent(m[1]); } catch (e) { return null; }
+}
+const hashFor = model => model == null ? "#/" : "#/model/" + encodeURIComponent(model);
+
+// Everything the menu and the page need, derived from results.json: models (meta order, then first appearance),
+// devices (meta order + any extra), and per (model, device) the entries and lokinfer's status.
+function index(db) {
+  const entries = db.entries || [];
+  const meta = db.meta || {};
+  const devices = [...(meta.devices || DEFAULT_DEVICES), ...entries.map(e => e.device)]
+    .filter((d, i, a) => a.indexOf(d) === i);
+  const sections = [...new Set(entries.map(e => e.section))];
+  const models = [];
+  const add = m => { if (!models.includes(m)) models.push(m); };
+  for (const s of sections) {
+    const ms = meta[s];
+    for (const m of Array.isArray(ms) ? ms : Object.keys(ms || {})) add(m);
+  }
+  entries.forEach(e => add(e.model));
+  const info = {};
+  for (const model of models) {
+    const secs = sections.filter(s => entries.some(e => e.section === s && e.model === model));
+    const mmeta = s => (Array.isArray(meta[s]) ? null : (meta[s] || {})[model]) || {};
+    const versions = {};
+    for (const device of devices) {
+      const groups = secs.map(s => ({ section: s, group: entries.filter(e => e.section === s && e.model === model &&
+                                                                       e.device === device) }))
+                         .filter(g => g.group.length);
+      const st = groups.length ? worst(groups.map(g => analyze(g.group, mmeta(g.section)).st)) : "missing";
+      versions[device] = { st, hasData: groups.length > 0 };
+    }
+    const metaSec = sections.find(s => !Array.isArray(meta[s]) && (meta[s] || {})[model]) || sections[0] || "models";
+    info[model] = { sections: secs.length ? secs : [metaSec], mmeta, versions };
+  }
+  return { entries, devices, sections, models, info };
+}
+
+function render(db) {
+  charts.forEach(c => c.destroy());
+  charts = [];
+  const main = document.getElementById("main");
+  main.innerHTML = "";
+  const ix = lastIx = index(db);
+  const { entries, devices, models, info } = ix;
+  const latest = entries.reduce((m, e) => (e.measured_at > m ? e.measured_at : m), "");
+  document.getElementById("updated").textContent =
+    `${entries.length} measurements · last update ${latest ? latest.replace("T", " ") : "—"}`;
+  renderControls();
+  const tot = wins(entries, () => true);
+  document.getElementById("totals").innerHTML =
+    `<span class="tt">lokinfer #1 in ${winsHTML(tot)} configurations (all models)</span>` +
+    devices.map(d => `<span class="dev">${esc(d)}: ${winsHTML(wins(entries, e => e.device === d))}</span>`).join("");
+
+  if (!entries.length && !models.length) {
+    main.innerHTML = `<div class="empty">No results yet. Run a bench (e.g. <code>bench/models/bench_kokoro.py</code>).</div>`;
+    return;
+  }
+  const multiSection = ix.sections.length > 1;
+  const sectionOrder = [...new Set(models.flatMap(m => info[m].sections))];
+  for (const section of sectionOrder) {
+    const inSec = models.filter(m => info[m].sections.includes(section));
+    if (!inSec.length) continue;
+    if (multiSection) {
+      const h = document.createElement("h2");
+      h.textContent = section;
+      main.appendChild(h);
+    }
+    for (const model of inSec) {
+      const mi = info[model];
+      const block = document.createElement("section");
+      block.id = blockId(model);
+      const collapsed = !!state.collapsed[model];
+      block.className = "model-block" + (collapsed ? " collapsed" : "");
+      const on = devices;  // every model shows all 4 versions (no per-version toggles: user, 2026-11-01)
+      const h = document.createElement("div");
+      h.className = "model-h";
+      const agg = worst(on.map(d => mi.versions[d].st));
+      h.innerHTML = `<button class="mname" data-model="${esc(model)}" aria-expanded="${!collapsed}" ` +
+                    `title="Click to collapse / expand">` +
+                    `<span class="caret">▾</span><span class="dot st-${agg}"></span>${esc(model)}</button>` +
+                    `<span class="wins" title="model × device × case configurations with a baseline where lokinfer is the fastest">` +
+                    `lokinfer #1 in ${winsHTML(wins(entries, e => e.model === model && e.section === section))} configurations</span>`;
+      block.appendChild(h);
+      const grid = document.createElement("div");
+      // Models with many cases (Kokoro: 16) get one full-width chart per row; the others keep the 2-column grid.
+      grid.className = (mi.mmeta(section).cases || []).length > 8 ? "grid one-col" : "grid";
+      block.appendChild(grid);
+      if (!collapsed) {
+        for (const device of on) {
+          const group = entries.filter(e => e.section === section && e.model === model && e.device === device);
+          grid.appendChild(group.length ? card(model, device, group, mi.mmeta(section)) : placeholder(model, device));
+        }
+      }
+      main.appendChild(block);
+    }
+  }
+  if (pendingScroll != null) {
+    const target = document.getElementById(blockId(pendingScroll));
+    pendingScroll = null;
+    if (target && target.scrollIntoView) target.scrollIntoView({ block: "start" });
+  }
+}
+
+// A version that is toggled on but has no measurement yet: an empty card with the "missing" (red) border.
+function placeholder(model, device) {
+  const el = document.createElement("div");
+  el.className = "card placeholder st-missing";
+  el.innerHTML = `<h3>${esc(model)} — ${esc(device)}</h3><div class="nodata-msg">No data yet for this version.</div>`;
+  return el;
+}
+
+// Menu events (delegated: the menu is rebuilt on every render).
+// Cases (X axis order), implementations (baselines, then lokinfer, then target), lookup and status of one card.
+function analyze(group, mmeta) {
+  const order = mmeta.cases || [];
+  const cases = [...new Set(group.map(e => e.case))].sort((a, b) => {
+    const ia = order.indexOf(a), ib = order.indexOf(b);
+    return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib) || a.localeCompare(b, undefined, { numeric: true });
+  });
+  const impls = [...new Set(group.map(e => e.impl))].sort((a, b) =>
+    (isTarget(a) - isTarget(b)) || (isLk(a) - isLk(b)) || a.localeCompare(b));
+  const unit = group[0].unit || "ms";
+  const at = (c, i) => group.find(e => e.case === c && e.impl === i);
+
+  return { cases, impls, unit, at, st: status(cases, impls, at) };
+}
+
+function card(model, device, group, mmeta) {
+  const el = document.createElement("div");
+  el.className = "card";
+  const { cases, impls, unit, at, st } = analyze(group, mmeta);
+  el.classList.add("st-" + st);
+  el.innerHTML = `<h3>${esc(model)} — ${esc(device)}</h3>${overall(cases, impls, at)}<div class="desc">${mmeta.description || ""}</div>
+                  <div class="chart"><canvas></canvas></div><div class="summary"></div>`;
+  const datasets = impls.map(impl => {
+    const color = colorOf(impl);
+    if (isTarget(impl)) {
+      return { type: "line", label: "target", data: cases.map(c => at(c, impl)?.value ?? null), showLine: false,
+               pointStyle: "line", pointRadius: 18, pointHoverRadius: 18, pointHitRadius: 6,
+               pointBorderWidth: 3, pointHoverBorderWidth: 4, borderColor: css("--muted"),
+               backgroundColor: css("--muted"), borderDash: [4, 3], order: 0,
+               datalabels: { display: false } };
+    }
+    return { type: "bar", label: impl, data: cases.map(c => at(c, impl)?.value ?? null),
+             backgroundColor: color, borderColor: color, borderWidth: 0, borderRadius: 3, order: 1,
+             maxBarThickness: 46 };
+  });
+  const chart = new Chart(el.querySelector("canvas"), {
+    type: "bar",  // base type: category X axis with bar offsets, also for a target-only chart
+    data: { labels: cases, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      scales: {
+        x: { grid: { display: false }, ticks: { color: css("--text") } },
+        y: { type: state.log ? "logarithmic" : "linear", beginAtZero: !state.log, grace: "10%",
+             title: { display: true, text: unit === "ms" ? "time per forward (ms) ↓" : unit, color: css("--muted") },
+             grid: { color: css("--grid") }, ticks: { color: css("--muted") } },
+      },
+      plugins: {
+        legend: { position: "top", align: "start", labels: { color: css("--text"), boxWidth: 12, boxHeight: 12 } },
+        datalabels: {
+          anchor: "end", align: "end", offset: 1, color: css("--text"), font: { size: 10.5 },
+          display: "auto", clamp: true,  // hide labels that would overlap instead of drawing a smear
+          formatter: (v, ctx) => {
+            if (v == null) return "";
+            const e = at(cases[ctx.dataIndex], ctx.dataset.label);
+            return fmtShort(v, unit) + (e && caveat(e).length ? "⚠" : "");
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const e = at(cases[ctx.dataIndex], ctx.dataset.label);
+              if (!e) return "";
+              const out = [`${e.impl}: ${fmt(e.value, unit)}`, `measured ${e.measured_at.replace("T", " ")}`];
+              const cv = caveat(e);
+              if (cv.length) out.push(`⚠ ${cv.join(", ")}`);
+              if (e.notes) out.push(e.notes);
+              return out;
+            },
+          },
+        },
+      },
+    },
+  });
+  charts.push(chart);
+  el.querySelector(".summary").innerHTML = summary(cases, impls, at, unit);
+  return el;
+}
+
+// Headline per card: lokinfer (its best variant per case) vs the best baseline. For each baseline implementation, the
+// geometric mean over the cases both have of (baseline time / lokinfer time); "best" = the baseline with the lowest
+// ratio (the closest competitor). > 1: lokinfer is faster.
+function overall(cases, impls, at) {
+  const bases = impls.filter(i => !isLk(i) && !isTarget(i));
+  let best = null;
+  for (const b of bases) {
+    const logs = [];
+    for (const c of cases) {
+      const lk = impls.filter(isLk).map(i => at(c, i)).filter(Boolean).sort((x, y) => x.value - y.value)[0];
+      const e = at(c, b);
+      if (lk && e) logs.push(Math.log(e.value / lk.value));
+    }
+    if (!logs.length) continue;
+    const r = Math.exp(logs.reduce((x, y) => x + y, 0) / logs.length);
+    if (!best || r < best.r) best = { r, impl: b, n: logs.length };
+  }
+  if (!best) return `<div class="overall" style="color: var(--muted)">Overall: no baseline to compare yet</div>`;
+  const faster = best.r >= 1;
+  const pct = faster ? (best.r - 1) * 100 : (1 / best.r - 1) * 100;
+  const cases_ = best.n === 1 ? "1 case" : `geomean of ${best.n} cases`;
+  return `<div class="overall ${faster ? "good" : "bad"}">Overall: lokinfer ${pct.toFixed(0)}% ${faster ? "faster" : "slower"}` +
+         ` than best (${best.impl}) · ${(faster ? best.r : 1 / best.r).toFixed(2)}× · ${cases_}</div>`;
+}
+
+// "Configurations" = model × device × case with both a lokinfer number and at least one baseline; lokinfer is #1
+// there when its best variant is at least as fast as the best baseline (targets excluded). Returns {won, total}.
+function wins(entries, keep) {
+  const by = new Map();
+  for (const e of entries) {
+    if (isTarget(e.impl) || !keep(e)) continue;
+    const k = e.section + "\u0000" + e.model + "\u0000" + e.device + "\u0000" + e.case;
+    const r = by.get(k) || { lk: Infinity, base: Infinity };
+    if (isLk(e.impl)) r.lk = Math.min(r.lk, e.value); else r.base = Math.min(r.base, e.value);
+    by.set(k, r);
+  }
+  let won = 0, total = 0;
+  for (const r of by.values()) {
+    if (r.lk === Infinity || r.base === Infinity) continue;
+    total++;
+    if (r.lk <= r.base) won++;
+  }
+  return { won, total };
+}
+const winsCls = w => (w.won === w.total ? "all" : w.won === 0 ? "none" : "some");
+const winsHTML = (w, label) => `${label ? label + " " : ""}<b class="${winsCls(w)}">${w.won} / ${w.total}</b>`;
+
+// Card border: "missing" if some case has a baseline but no lokinfer number; otherwise from the overall ratio vs the
+// best baseline (geomean, as in overall()): >= 1 best, >= 1/1.1 near (within 10 %), else slow. No baseline: "best"
+// only if lokinfer has every case (nothing to compare is not a failure).
+function status(cases, impls, at) {
+  const lkAt = c => impls.filter(isLk).map(i => at(c, i)).filter(Boolean).sort((x, y) => x.value - y.value)[0];
+  const bases = impls.filter(i => !isLk(i) && !isTarget(i));
+  for (const c of cases)
+    if (!lkAt(c) && (bases.some(b => at(c, b)) || at(c, "target"))) return "missing";
+  let best = null;
+  for (const b of bases) {
+    const logs = cases.filter(c => lkAt(c) && at(c, b)).map(c => Math.log(at(c, b).value / lkAt(c).value));
+    if (logs.length) {
+      const r = Math.exp(logs.reduce((x, y) => x + y, 0) / logs.length);
+      best = best === null ? r : Math.min(best, r);
+    }
+  }
+  if (best === null) return cases.every(lkAt) ? "best" : "missing";
+  return best >= 1 ? "best" : best >= 1 / 1.1 ? "near" : "slow";
+}
+
+function summary(cases, impls, at, unit) {
+  const lines = [];
+  for (const c of cases) {
+    const lk = impls.filter(isLk).map(i => at(c, i)).filter(Boolean).sort((a, b) => a.value - b.value)[0];
+    const base = impls.filter(i => !isLk(i) && !isTarget(i)).map(i => at(c, i)).filter(Boolean)
+      .sort((a, b) => a.value - b.value)[0];
+    const tgt = at(c, "target");
+    const parts = [];
+    if (lk && base) {
+      const r = base.value / lk.value;
+      const cls = r >= 1 ? "good" : "bad";
+      parts.push(`<span class="${cls}">${r >= 1 ? r.toFixed(2) + "× faster" : (1 / r).toFixed(2) + "× slower"}</span>` +
+                 ` than the best baseline (${base.impl}, ${fmt(base.value, unit)})`);
+    }
+    if (lk && tgt) {
+      const ok = lk.value <= tgt.value;
+      parts.push(`<span class="${ok ? "good" : "bad"}">target ≤ ${fmt(tgt.value, unit)} ${ok ? "met" : "not met"}</span>`);
+    }
+    const cv = [lk, base].filter(Boolean).flatMap(e => caveat(e).length ? [e.impl] : []);
+    if (cv.length) parts.push(`<span class="warn">⚠ ${cv.join(", ")}: measured in a degraded power state</span>`);
+    if (parts.length) lines.push(`<div><b>${c}</b> — best lokinfer ${lk ? `(${lk.impl}, ${fmt(lk.value, unit)}) ` : ""}` +
+                                  `${parts.join(" · ")}</div>`);
+  }
+  return lines.join("");
+}
+
+function renderControls() {
+  const box = document.getElementById("controls");
+  box.innerHTML = "";
+  const b = document.createElement("button");
+  b.className = "chip" + (state.log ? " on" : "");
+  b.textContent = "Log scale";
+  b.onclick = () => { state.log = !state.log; save(); render(lastDb); };
+  box.appendChild(b);
+}
+
+function save() {
+  try {
+    localStorage.setItem("lk-perf-view", JSON.stringify({ log: state.log, hidden: state.hidden,
+                                                         collapsed: state.collapsed }));
+  } catch (e) {}
+}
+try {
+  const saved = JSON.parse(localStorage.getItem("lk-perf-view") || "{}");
+  if (typeof saved.log === "boolean") state.log = saved.log;
+  if (saved.hidden && typeof saved.hidden === "object") state.hidden = saved.hidden;
+  if (saved.collapsed && typeof saved.collapsed === "object") state.collapsed = saved.collapsed;
+} catch (e) {}
+
+let lastDb = { entries: [] };
+let lastIx = index(lastDb);
+async function poll() {
+  try {
+    const r = await fetch("results.json", { cache: "no-store" });
+    if (r.ok) {
+      const text = await r.text();
+      if (text !== lastText) {
+        const db = JSON.parse(text);  // a parse failure leaves lastText unchanged, so the next poll retries
+        const first = !lastText;
+        lastText = text;
+        lastDb = db;
+        if (first) pendingScroll = routeModel();  // a linked / reloaded #/model/... lands on that model
+        render(lastDb);
+      }
+    } else {
+      document.getElementById("updated").textContent = `cannot load results.json (HTTP ${r.status})`;
+    }
+  } catch (e) {
+    document.getElementById("updated").textContent = e instanceof SyntaxError
+      ? "results.json is not valid JSON"
+      : "cannot load results.json (is scripts/perf_dashboard.sh running?)";
+  }
+}
+// Clicking a model's name collapses / expands its section (event delegation on <main>); remembered per browser.
+const mainEl = document.getElementById("main");
+mainEl.addEventListener("click", ev => {
+  const b = ev.target.closest ? ev.target.closest(".mname") : null;
+  if (!b) return;
+  const m = b.dataset.model;
+  if (state.collapsed[m]) delete state.collapsed[m]; else state.collapsed[m] = true;
+  save();
+  render(lastDb);
+});
+addEventListener("hashchange", () => { pendingScroll = routeModel(); render(lastDb); });
+poll();
+setInterval(poll, 3000);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => render(lastDb));
+</script>
+</body>
+</html>

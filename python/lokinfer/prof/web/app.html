@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lokinfer profiles</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1d1f24; --muted: #69707d; --line: #e3e5ea; --panel: #f6f7f9; --accent: #2f6fde;
+  --good: #1f9d55; --bad: #d64545; --warn: #b7791f; --sel: #fff3c4;
+  --c-conv: #4e79a7; --c-conv_transpose: #a0cbe8; --c-matmul: #f28e2b; --c-lstm: #e15759; --c-norm: #76b7b2;
+  --c-signal: #59a14f; --c-layout: #bab0ac; --c-activation: #edc948; --c-elementwise: #b07aa1; --c-attention: #ff9da7;
+  --c-embedding: #9c755f; --c-other: #8d8d8d; --c-sync: #555555;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #15171c; --fg: #e4e6eb; --muted: #9aa1ad; --line: #2c3038; --panel: #1d2026; --accent: #6ea0ff;
+          --sel: #4a4020; --c-sync: #aaaaaa; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); }
+header { padding: 10px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0; }
+header .sub { color: var(--muted); }
+main { padding: 12px 16px 40px; }
+a { color: var(--accent); cursor: pointer; text-decoration: none; }
+nav.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 10px 0; flex-wrap: wrap; }
+nav.tabs button { border: 0; background: none; color: var(--muted); padding: 6px 10px; cursor: pointer; font: inherit; border-bottom: 2px solid transparent; }
+nav.tabs button.on { color: var(--fg); border-bottom-color: var(--accent); }
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: 3px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--panel); cursor: pointer; user-select: none; font-weight: 600; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.wrap { white-space: normal; word-break: break-all; font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--muted); }
+tr:hover td { background: var(--panel); }
+.bar { display: inline-block; height: 8px; background: var(--accent); vertical-align: middle; border-radius: 2px; opacity: .75; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; margin: 8px 0 14px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+.card .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+.card .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.card .s { color: var(--muted); font-size: 11px; }
+.note { background: var(--sel); border-radius: 4px; padding: 6px 10px; margin: 4px 0; }
+.muted { color: var(--muted); }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+input[type=search], select { font: inherit; padding: 3px 6px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; }
+pre.ir { font: 11.5px/1.45 ui-monospace, Menlo, monospace; background: var(--panel); padding: 8px; overflow: auto; max-height: 75vh; margin: 0; }
+pre.ir .ln { color: var(--muted); display: inline-block; width: 5ch; text-align: right; margin-right: 1ch; user-select: none; }
+pre.ir .add { background: rgba(31,157,85,.18); display: block; }
+pre.ir .hl { background: var(--sel); display: block; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+#tl-wrap { position: relative; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+#tl { display: block; width: 100%; cursor: grab; }
+#tip { position: fixed; pointer-events: none; background: var(--fg); color: var(--bg); padding: 4px 8px; border-radius: 4px; font-size: 11px; max-width: 520px; display: none; z-index: 9; white-space: pre-wrap; }
+.ratio-good { color: var(--good); font-weight: 600; } .ratio-bad { color: var(--bad); font-weight: 600; }
+.scroll { max-height: 72vh; overflow: auto; border: 1px solid var(--line); border-radius: 4px; }
+svg text { fill: var(--muted); font-size: 10px; }
+</style>
+</head>
+<body>
+<header><h1 id="title">lokinfer profiles</h1><span class="sub" id="subtitle"></span></header>
+<main id="main"></main>
+<div id="tip"></div>
+<script id="embedded" type="application/json">/*EMBEDDED_DATA*/null</script>
+<script>
+"use strict";
+const EMB = JSON.parse(document.getElementById("embedded").textContent.replace("/*EMBEDDED_DATA*/", ""));
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const f = (x, d = 3) => x == null || isNaN(x) ? "" : Number(x).toFixed(d);
+const fms = x => x == null ? "" : (x >= 100 ? f(x, 1) : x >= 1 ? f(x, 2) : f(x, 3));
+const fbytes = b => b == null ? "" : b >= 1 << 30 ? f(b / (1 << 30), 2) + " GiB" : b >= 1 << 20 ? f(b / (1 << 20), 1) + " MiB" : b >= 1024 ? f(b / 1024, 1) + " KiB" : b + " B";
+const catColor = c => getComputedStyle(document.documentElement).getPropertyValue("--c-" + c).trim() || "#888";
+const state = {tab: "summary", filter: "", sort: {}, irPass: null, irHl: null};
+
+async function getJSON(u) { const r = await fetch(u); if (!r.ok) throw new Error(u + ": " + r.status); return r.json(); }
+async function getText(u) { const r = await fetch(u); if (!r.ok) throw new Error(u + ": " + r.status); return r.text(); }
+
+// ------------------------------------------------------------------------------------------- routing
+async function route() {
+  const h = location.hash.slice(1);
+  const p = new URLSearchParams(h);
+  if (EMB) return showRun(EMB.run, EMB);
+  if (p.get("a") && p.get("b")) return showCompare(p.get("a"), p.get("b"));
+  if (p.get("run")) return showRun(await getJSON("api/run/" + encodeURIComponent(p.get("run"))), null);
+  return showRuns();
+}
+window.addEventListener("hashchange", () => { state.tab = new URLSearchParams(location.hash.slice(1)).get("tab") || "summary"; route(); });
+
+// ------------------------------------------------------------------------------------------- run list
+async function showRuns() {
+  $("#title").textContent = "lokinfer profiles"; $("#subtitle").textContent = "runs in the profile directory";
+  const runs = await getJSON("api/runs");
+  const sel = new Set();
+  const m = $("#main");
+  m.innerHTML = `<div class="row"><input type="search" id="q" placeholder="filter (model, device, kind...)">
+    <button id="cmp" disabled>Compare the 2 selected</button><span class="muted">${runs.length} runs</span></div>
+    <div class="scroll"><table><thead><tr><th></th><th>created</th><th>kind</th><th>model</th><th>case</th><th>device</th>
+    <th class="num">e2e median ms</th><th class="num">kernel calls</th><th>id</th></tr></thead><tbody id="rb"></tbody></table></div>`;
+  const draw = () => {
+    const q = $("#q").value.toLowerCase();
+    $("#rb").innerHTML = runs.filter(r => !q || JSON.stringify(r).toLowerCase().includes(q)).map(r => `<tr>
+      <td><input type="checkbox" data-id="${esc(r.id)}" ${sel.has(r.id) ? "checked" : ""}></td><td>${esc(r.created)}</td>
+      <td>${esc(r.kind)}</td><td>${esc(r.model)}</td><td>${esc(r.case)}</td><td>${esc(r.device)}</td>
+      <td class="num">${fms(r.e2e_ms)}</td><td class="num">${r.kernel_calls ?? ""}</td>
+      <td><a href="#run=${encodeURIComponent(r.id)}">${esc(r.id)}</a> · <a href="runs/${encodeURIComponent(r.id)}/report.html" target="_blank">report</a></td></tr>`).join("");
+    m.querySelectorAll("input[type=checkbox]").forEach(cb => cb.onchange = () => {
+      cb.checked ? sel.add(cb.dataset.id) : sel.delete(cb.dataset.id); $("#cmp").disabled = sel.size !== 2; });
+  };
+  $("#q").oninput = draw; draw();
+  $("#cmp").onclick = () => { const [a, b] = [...sel]; location.hash = `a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`; };
+}
+
+// ------------------------------------------------------------------------------------------- one run
+let RUN = null, BUNDLE = null;
+async function irText(file) {
+  if (BUNDLE && BUNDLE.files && file in BUNDLE.files) return BUNDLE.files[file];
+  return getText("api/run/" + encodeURIComponent(RUN.id) + "/file/" + file);
+}
+
+function showRun(run, bundle) {
+  RUN = run; BUNDLE = bundle;
+  state.tab = new URLSearchParams(location.hash.slice(1)).get("tab") || state.tab || "summary";
+  $("#title").textContent = `${run.model} · ${run.case} · ${run.device}`;
+  $("#subtitle").innerHTML = `${esc(run.kind)} · ${esc(run.created)} · ${esc(run.id)}` + (bundle ? "" : ` · <a href="#">all runs</a>`);
+  const tabs = [["summary", "Summary"], ["kernels", "Kernels"], ["shapes", "By shape"], ["ops", run.kind === "lokinfer" ? "Instances" : null],
+    ["categories", "Categories"], ["timeline", "Timeline"], ["memory", run.memory ? "Memory" : null],
+    ["dispatches", run.dispatches ? "Metal dispatches" : null], ["ir", run.ir ? "IR per pass" : null], ["files", "Settings & files"]].filter(t => t[1]);
+  $("#main").innerHTML = `<nav class="tabs">${tabs.map(([k, l]) => `<button data-t="${k}" class="${k === state.tab ? "on" : ""}">${l}</button>`).join("")}</nav><div id="pane"></div>`;
+  $("#main").querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { state.tab = b.dataset.t; showRun(RUN, BUNDLE); });
+  ({summary: paneSummary, kernels: () => paneTable(run.kernels, "kernels"), shapes: () => paneTable(run.kernels_by_shape, "shapes"),
+    ops: () => paneTable(run.ops, "ops"), categories: paneCategories, timeline: paneTimeline, memory: paneMemory,
+    dispatches: paneDispatches, ir: paneIR, files: paneFiles}[state.tab] || paneSummary)();
+}
+
+function card(k, v, s = "") { return `<div class="card"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`; }
+
+function paneSummary() {
+  const s = RUN.summary, e = s.e2e_ms || {};
+  let h = (RUN.notes || []).map(n => `<div class="note">${esc(n)}</div>`).join("");
+  h += `<div class="cards">` + card("E2E median", fms(e.median) + " ms", `p10 ${fms(e.p10)} · p90 ${fms(e.p90)} · n=${e.n}`);
+  if (s.profiled_ms) h += card("Profiled call", fms(s.profiled_ms.median) + " ms", `overhead ${f(s.profile_overhead_pct, 1)}% · ${s.profiled_calls} calls`);
+  if (s.gpu_busy_ms) h += card("GPU busy", fms(s.gpu_busy_ms) + " ms", s.gpu_utilization_pct != null ? f(s.gpu_utilization_pct, 0) + "% of e2e" : "");
+  if (s.cpu_kernel_ms != null) h += card(RUN.kind === "torch" ? "Sum of op times" : "CPU kernels", fms(s.cpu_kernel_ms) + " ms", "");
+  if (s.sync_wait_ms) h += card("Sync / finish wait", fms(s.sync_wait_ms) + " ms", "CPU waiting on the GPU at sync / end");
+  if (s.inflight_wait_ms) h += card("In-flight wait", fms(s.inflight_wait_ms) + " ms", "GPU kernels blocked on the previous segment before encoding");
+  h += card("Kernel calls", s.kernel_calls ?? "", s.gpu_kernels != null ? `${s.gpu_kernels} GPU · ${s.dispatches} dispatches` : "");
+  if (RUN.memory) h += card("Arena", fbytes(RUN.memory.arena_bytes), `planned ${fbytes(RUN.memory.planned_bytes)} · outputs ${fbytes(RUN.memory.alloc_bytes)}`);
+  if (s.gpu_mode) h += card("GPU timing", s.gpu_mode, s.gpu_timestamps ? "Metal 4 counter-heap timestamps" : "CPU wall time");
+  const ms = RUN.machine_state || {};
+  h += card("Machine state", esc(ms.thermal ?? (ms.end && ms.end.thermal) ?? "?"), `LPM ${ms.low_power_mode ?? "?"} · ${esc(ms.power ?? "")}`);
+  h += `</div><h3>Top kernels</h3>` + tableHTML(RUN.kernels.slice(0, 15), "kernels", true) + `<h3>Categories</h3>` + catBars(RUN.categories);
+  $("#pane").innerHTML = h; wireTable();
+}
+
+function catBars(cats) {
+  const max = Math.max(1e-9, ...cats.map(c => c.total_ms));
+  return `<table><tbody>${cats.map(c => `<tr><td><span class="swatch" style="background:${catColor(c.category)}"></span>${esc(c.category)}</td>
+    <td class="num">${fms(c.total_ms)} ms</td><td class="num">${f(c.pct, 1)}%</td><td class="num">${f(c.calls, 0)} calls</td>
+    <td style="width:45%"><span class="bar" style="width:${100 * c.total_ms / max}%;background:${catColor(c.category)}"></span></td></tr>`).join("")}</tbody></table>`;
+}
+function paneCategories() { $("#pane").innerHTML = `<p class="muted">Coarse categories shared with prof-torch (the per-op mapping used by Compare).</p>` + catBars(RUN.categories); }
+
+const COLS = {
+  kernels: [["name", "kernel"], ["device", "dev"], ["category", "category"], ["calls", "calls/iter", "num"], ["total_ms", "total ms/iter", "num"],
+            ["pct", "% e2e", "num"], ["mean_us", "mean µs", "num"], ["min_us", "min µs", "num"], ["max_us", "max µs", "num"], ["encode_us", "encode µs", "num"], ["wait_us", "wait µs", "num"], ["tflops", "TF/s", "num"], ["num_shapes", "shapes", "num"]],
+  shapes: [["name", "kernel"], ["device", "dev"], ["calls", "calls/iter", "num"], ["total_ms", "total ms/iter", "num"], ["pct", "% e2e", "num"],
+           ["mean_us", "mean µs", "num"], ["gflop", "GFLOP/iter", "num"], ["tflops", "TF/s", "num"], ["shapes", "signature"]],
+  ops: [["ops", "op #", "num"], ["name", "kernel"], ["device", "dev"], ["total_ms", "ms/iter", "num"], ["pct", "% e2e", "num"], ["mean_us", "mean µs", "num"],
+        ["min_us", "min µs", "num"], ["max_us", "max µs", "num"], ["shapes", "signature"]],
+};
+function cell(r, [k, , cls], kind) {
+  let v = r[k];
+  if (k === "shapes") return `<td class="wrap">${esc((v || []).join(" | "))}</td>`;
+  if (k === "ops") { const op = (v || [])[0]; return `<td class="num">${RUN.ir ? `<a data-op="${op}">${op}</a>` : op}</td>`; }
+  if (k === "name" && RUN.kind === "lokinfer" && RUN.ir && r.ops && kind !== "ops") return `<td><a data-op="${r.ops[0]}" title="show in IR">${esc(v)}</a></td>`;
+  if (v === undefined || v === null) return `<td${cls ? ` class="${cls}"` : ""}></td>`;
+  if (k === "tflops" || k === "gflop") return `<td class="num">${f(v, 2)}</td>`;
+  if (k === "pct") return `<td class="num">${f(v, 1)} <span class="bar" style="width:${Math.min(60, v * 0.6)}px"></span></td>`;
+  if (k === "category") return `<td><span class="swatch" style="background:${catColor(v)}"></span>${esc(v)}</td>`;
+  if (typeof v === "number") return `<td class="num">${k === "calls" ? f(v, v % 1 ? 2 : 0) : k.endsWith("_ms") ? fms(v) : Number.isInteger(v) ? v : f(v, 1)}</td>`;
+  return `<td${cls ? ` class="${cls}"` : ""}>${esc(v)}</td>`;
+}
+function tableHTML(rows, kind, compact) {
+  const cols = COLS[kind];
+  const s = state.sort[kind];
+  if (s) rows = [...rows].sort((a, b) => { const x = a[s.k], y = b[s.k]; return (x > y ? 1 : x < y ? -1 : 0) * s.dir; });
+  const q = state.filter.toLowerCase();
+  if (q && !compact) rows = rows.filter(r => JSON.stringify(r).toLowerCase().includes(q));
+  return `<div class="scroll"><table data-kind="${kind}"><thead><tr>${cols.map(([k, l, c]) => `<th data-k="${k}" class="${c || ""}">${l}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(r => `<tr>${cols.map(c => cell(r, c, kind)).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+function paneTable(rows, kind) {
+  $("#pane").innerHTML = `<div class="row"><input type="search" id="flt" placeholder="filter" value="${esc(state.filter)}"><span class="muted">${rows.length} rows · click a header to sort${RUN.kind === "lokinfer" ? " · GPU rows = GPU timestamp time, encode = CPU time to encode, wait = CPU blocked on the previous in-flight segment first" : ""}</span></div><div id="tbl">${tableHTML(rows, kind)}</div>`;
+  $("#flt").oninput = e => { state.filter = e.target.value; $("#tbl").innerHTML = tableHTML(rows, kind); wireTable(rows); };
+  wireTable(rows);
+}
+function wireTable(rows) {
+  document.querySelectorAll("table[data-kind] th").forEach(th => th.onclick = () => {
+    const kind = th.closest("table").dataset.kind, k = th.dataset.k, s = state.sort[kind];
+    state.sort[kind] = {k, dir: s && s.k === k ? -s.dir : -1}; showRun(RUN, BUNDLE);
+  });
+  document.querySelectorAll("a[data-op]").forEach(a => a.onclick = () => { state.irHl = +a.dataset.op; state.irPass = RUN.ir.passes.length - 1; state.tab = "ir"; showRun(RUN, BUNDLE); });
+}
+
+// ------------------------------------------------------------------------------------------- timeline
+function paneTimeline() {
+  const tl = RUN.timeline;
+  if (!tl || !tl.events.length) { $("#pane").innerHTML = "<p>No timeline.</p>"; return; }
+  $("#pane").innerHTML = `<p class="muted">Call #${tl.call} (the median profiled call), ${fms(tl.total_ns / 1e6)} ms. Wheel: zoom · drag: pan · double-click: reset. Colors = category.</p>
+    <div id="tl-wrap"><canvas id="tl"></canvas></div><div class="row" id="legend"></div>`;
+  const cv = $("#tl"), ctx = cv.getContext("2d"), dpr = window.devicePixelRatio || 1;
+  const lanes = tl.lanes, laneH = 26, top = 22, H = top + lanes.length * laneH + 8;
+  const t1max = Math.max(tl.total_ns, ...tl.events.map(e => e.t1));
+  let v0 = 0, v1 = t1max;
+  const evs = tl.events.map(e => ({...e, cat: e.lane === "CPU: sync" ? "sync" : (RUN.kind === "torch" ? catOfTorch(e.name) : catOf(e.name)), li: lanes.indexOf(e.lane)}));
+  function draw() {
+    const W = cv.clientWidth; cv.width = W * dpr; cv.height = H * dpr; cv.style.height = H + "px"; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const css = getComputedStyle(document.documentElement);
+    ctx.clearRect(0, 0, W, H); ctx.font = "10px -apple-system, sans-serif";
+    const L = 90, X = t => L + (t - v0) / (v1 - v0) * (W - L - 6);
+    ctx.fillStyle = css.getPropertyValue("--muted");
+    const step = niceStep((v1 - v0) / 8);
+    for (let t = Math.ceil(v0 / step) * step; t <= v1; t += step) { ctx.fillRect(X(t), top - 4, 1, H - top); ctx.fillText(fmsT(t), X(t) + 2, 12); }
+    lanes.forEach((l, i) => ctx.fillText(l, 4, top + i * laneH + 16));
+    for (const e of evs) {
+      if (e.t1 < v0 || e.t0 > v1) continue;
+      const x0 = X(e.t0), x1 = Math.max(X(e.t1), x0 + 0.6);
+      ctx.fillStyle = css.getPropertyValue("--c-" + e.cat).trim() || "#888";
+      ctx.fillRect(x0, top + e.li * laneH + 3, x1 - x0, laneH - 8);
+      if (x1 - x0 > 40) { ctx.fillStyle = "#000"; ctx.fillText(e.name.slice(0, Math.floor((x1 - x0) / 6)), x0 + 2, top + e.li * laneH + 15); }
+    }
+  }
+  const fmsT = t => (t / 1e6).toFixed((v1 - v0) < 2e6 ? 3 : 1) + " ms";
+  function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x))); return [1, 2, 5, 10].map(m => m * p).find(s => s >= x); }
+  function tAt(px) { const W = cv.clientWidth, L = 90; return v0 + (px - L) / (W - L - 6) * (v1 - v0); }
+  cv.onwheel = ev => { ev.preventDefault(); const t = tAt(ev.offsetX), k = Math.exp(ev.deltaY * 0.002); v0 = t - (t - v0) * k; v1 = t + (v1 - t) * k; if (v1 - v0 < 1e3) v1 = v0 + 1e3; draw(); };
+  let drag = null;
+  cv.onmousedown = ev => drag = {x: ev.offsetX, v0, v1};
+  window.onmouseup = () => drag = null;
+  cv.ondblclick = () => { v0 = 0; v1 = t1max; draw(); };
+  cv.onmousemove = ev => {
+    if (drag) { const dt = (ev.offsetX - drag.x) / (cv.clientWidth - 96) * (drag.v1 - drag.v0); v0 = drag.v0 - dt; v1 = drag.v1 - dt; draw(); return; }
+    const t = tAt(ev.offsetX), li = Math.floor((ev.offsetY - top) / laneH);
+    const hit = evs.find(e => e.li === li && e.t0 <= t + (v1 - v0) / 800 && e.t1 >= t - (v1 - v0) / 800);
+    const tip = $("#tip");
+    if (!hit) { tip.style.display = "none"; return; }
+    tip.style.display = "block"; tip.style.left = (ev.clientX + 12) + "px"; tip.style.top = (ev.clientY + 12) + "px";
+    tip.textContent = `${hit.name}${hit.op != null ? "  (op #" + hit.op + ")" : ""}\n${hit.lane}: ${((hit.t1 - hit.t0) / 1e3).toFixed(1)} µs @ ${(hit.t0 / 1e6).toFixed(3)} ms\n${hit.sig || ""}`;
+  };
+  cv.onmouseleave = () => $("#tip").style.display = "none";
+  new ResizeObserver(draw).observe(cv);
+  const cats = [...new Set(evs.map(e => e.cat))];
+  $("#legend").innerHTML = cats.map(c => `<span><span class="swatch" style="background:${catColor(c)}"></span>${c}</span>`).join("");
+  draw();
+}
+let catMap = null, catRun = null;
+function catOf(name) {
+  if (catRun !== RUN) { catMap = new Map(RUN.kernels.map(k => [k.name, k.category])); catRun = RUN; }
+  return catMap.get(name) || "other";
+}
+const catOfTorch = catOf;
+
+// ------------------------------------------------------------------------------------------- memory
+function paneMemory() {
+  const m = RUN.memory;
+  let h = `<div class="cards">${card("Arenas", fbytes(m.arena_bytes), `${m.plans.length} mem.plan`)}${card("Planned", fbytes(m.planned_bytes), "sum of plan totals this call")}${card("Fresh allocs", fbytes(m.alloc_bytes), `${m.allocs.length} buffer.alloc (outputs etc.)`)}</div>`;
+  m.plans.forEach((p, i) => {
+    h += `<h3>mem.plan op #${p.op}: ${fbytes(p.total)} for ${p.num_buffers} buffers (arena ${fbytes(p.arena)}, align ${p.align})</h3>
+      <p class="muted">Lower bound (peak of live bytes) ${fbytes(p.lower_bound)} · planner efficiency ${f(100 * p.efficiency, 1)}%. Each rectangle is a buffer: x = live range (op indices), y = offset in the arena.</p>
+      <svg id="mp${i}" width="100%" height="340" style="border:1px solid var(--line);border-radius:4px"></svg>`;
+  });
+  if (m.allocs.length) h += `<h3>buffer.alloc</h3><table><thead><tr><th class="num">op #</th><th class="num">bytes</th><th>output</th></tr></thead><tbody>${m.allocs.map(a => `<tr><td class="num">${a.op}</td><td class="num">${fbytes(a.bytes)}</td><td>${a.output}</td></tr>`).join("")}</tbody></table>`;
+  $("#pane").innerHTML = h;
+  m.plans.forEach((p, i) => {
+    const svg = $("#mp" + i), W = svg.clientWidth || 900, Hh = 320, L = 60;
+    const tmax = Math.max(1, ...p.buffers.map(b => b[2] + 1)), ymax = Math.max(1, p.total);
+    let s = "";
+    for (const [size, st, en, off] of p.buffers) {
+      const x = L + st / tmax * (W - L - 10), w = Math.max(1, (en + 1 - st) / tmax * (W - L - 10));
+      const y = 10 + off / ymax * Hh, hh = Math.max(1, size / ymax * Hh);
+      s += `<rect x="${x}" y="${y}" width="${w}" height="${hh}" fill="var(--accent)" fill-opacity=".45" stroke="var(--accent)" stroke-width=".5"><title>${fbytes(size)} @ ${fbytes(off)}, ops ${st}..${en}</title></rect>`;
+    }
+    s += `<text x="4" y="14">0</text><text x="4" y="${Hh + 8}">${fbytes(p.total)}</text><text x="${L}" y="${Hh + 26}">op 0</text><text x="${W - 60}" y="${Hh + 26}">op ${tmax}</text>`;
+    svg.innerHTML = s;
+  });
+}
+
+function paneDispatches() {
+  const d = RUN.dispatches;
+  $("#pane").innerHTML = `<p class="muted">Every Metal dispatch of a profiled call, by pipeline function. Cross-check a function's pipeline statistics with <code>prof-lokinfer metal stats</code> and its AIR with <code>prof-lokinfer metal air FUNCTION</code>.</p>
+   <div class="scroll"><table><thead><tr><th>function</th><th class="num">dispatches/iter</th><th>kernels</th><th>grids (examples)</th></tr></thead><tbody>
+   ${d.map(r => `<tr><td>${esc(r.function)}</td><td class="num">${f(r.dispatches, 0)}</td><td class="wrap">${esc(r.kernels.join(", "))}</td><td class="wrap">${esc(r.grids.join(" | "))}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+// ------------------------------------------------------------------------------------------- IR
+async function paneIR() {
+  const passes = RUN.ir.passes;
+  if (state.irPass == null) state.irPass = passes.length - 1;
+  $("#pane").innerHTML = `<div class="row"><select id="ps">${passes.map((p, i) => `<option value="${i}" ${i === state.irPass ? "selected" : ""}>${i}. ${esc(p.name)} (${p.lines} lines, ${p.stats.ops.kernel || 0} kernels)</option>`).join("")}</select>
+    <label><input type="checkbox" id="df" ${state.irDiff ? "checked" : ""}> highlight lines new vs the previous pass</label>
+    <span class="muted" id="irinfo"></span></div><pre class="ir" id="irt">loading…</pre>`;
+  $("#ps").onchange = e => { state.irPass = +e.target.value; state.irHl = null; paneIR(); };
+  $("#df").onchange = e => { state.irDiff = e.target.checked; paneIR(); };
+  const cur = await irText(passes[state.irPass].file);
+  const prev = state.irDiff && state.irPass > 0 ? new Set((await irText(passes[state.irPass - 1].file)).split("\n").map(s => s.trim())) : null;
+  const final = state.irPass === passes.length - 1;
+  const hlLine = final && state.irHl != null && RUN.ir.exec_line != null ? RUN.ir.exec_line + 1 + state.irHl : -1;
+  const timeOf = {};
+  if (final && RUN.ops) for (const o of RUN.ops) for (const op of o.ops || []) timeOf[op] = o;
+  const lines = cur.split("\n");
+  $("#irt").innerHTML = lines.map((l, i) => {
+    let cls = i === hlLine ? "hl" : prev && !prev.has(l.trim()) ? "add" : "";
+    let extra = "";
+    if (final && RUN.ir.exec_line != null && i > RUN.ir.exec_line) { const o = timeOf[i - RUN.ir.exec_line - 1]; if (o) extra = `  <span class="muted">// ${fms(o.total_ms)} ms/iter (${f(o.pct, 1)}%)</span>`; }
+    return `<span class="${cls}" id="irl${i}"><span class="ln">${i + 1}</span>${esc(l)}${extra}</span>` + (cls ? "" : "\n");
+  }).join("");
+  const s = passes[state.irPass].stats;
+  $("#irinfo").textContent = Object.entries(s.ops).map(([k, v]) => `${k} ${v}`).join(" · ");
+  if (hlLine >= 0) { const el = $("#irl" + hlLine); if (el) el.scrollIntoView({block: "center"}); }
+}
+
+function paneFiles() {
+  const r = RUN;
+  const files = Object.entries(r.files || {});
+  $("#pane").innerHTML = `<h3>Settings</h3><pre class="ir">${esc(JSON.stringify({settings: r.settings, machine_state: r.machine_state, host: r.host}, null, 2))}</pre>
+    <h3>Files</h3><ul>${files.map(([k, v]) => `<li>${esc(k)}: ${BUNDLE ? esc(v) : `<a href="api/run/${encodeURIComponent(r.id)}/file/${v}" target="_blank">${esc(v)}</a>`}</li>`).join("")}
+    ${(r.ir ? r.ir.passes : []).map(p => `<li>IR ${esc(p.name)}: ${esc(p.file)}</li>`).join("")}</ul>`;
+}
+
+// ------------------------------------------------------------------------------------------- compare
+async function showCompare(a, b) {
+  const c = await getJSON(`api/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
+  $("#title").textContent = "Compare"; $("#subtitle").innerHTML = `A = ${esc(c.a)}<br>B = ${esc(c.b)} · <a href="#">all runs</a>`;
+  const rc = x => x == null ? "" : `<span class="${x > 1.05 ? "ratio-bad" : x < 0.95 ? "ratio-good" : ""}">${f(x, 2)}×</span>`;
+  const max = Math.max(1e-9, ...c.categories.map(r => Math.max(r.a_ms, r.b_ms)));
+  $("#main").innerHTML = `<div class="cards">${card("A e2e", fms(c.e2e.a_ms) + " ms")}${card("B e2e", fms(c.e2e.b_ms) + " ms")}${card("B / A", c.e2e.ratio ? f(c.e2e.ratio, 3) + "×" : "", "< 1: B is faster")}</div>
+   <h3>By category (per-op mapping lokinfer ↔ torch)</h3><table><thead><tr><th>category</th><th class="num">A ms</th><th class="num">B ms</th><th class="num">B/A</th><th class="num">A calls</th><th class="num">B calls</th><th style="width:40%"></th></tr></thead><tbody>
+   ${c.categories.map(r => `<tr><td><span class="swatch" style="background:${catColor(r.category)}"></span>${esc(r.category)}</td><td class="num">${fms(r.a_ms)}</td><td class="num">${fms(r.b_ms)}</td><td class="num">${rc(r.ratio)}</td><td class="num">${f(r.a_calls, 0)}</td><td class="num">${f(r.b_calls, 0)}</td>
+     <td><span class="bar" style="width:${100 * r.a_ms / max}%;background:${catColor(r.category)}"></span><br><span class="bar" style="width:${100 * r.b_ms / max}%;background:var(--muted)"></span></td></tr>`).join("")}</tbody></table>
+   <h3>By kernel / op name (${c.kernels_matched} in both)</h3><div class="row"><input type="search" id="kq" placeholder="filter"></div><div class="scroll" id="kt"></div>`;
+  const draw = () => {
+    const q = $("#kq").value.toLowerCase();
+    $("#kt").innerHTML = `<table><thead><tr><th>name</th><th>category</th><th class="num">A ms/iter</th><th class="num">B ms/iter</th><th class="num">B/A</th><th class="num">A calls</th><th class="num">B calls</th></tr></thead><tbody>
+     ${c.kernels.filter(r => !q || (r.name + r.category).toLowerCase().includes(q)).map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.category)}</td><td class="num">${fms(r.a_ms)}</td><td class="num">${fms(r.b_ms)}</td><td class="num">${rc(r.ratio)}</td><td class="num">${r.a_calls == null ? "" : f(r.a_calls, 0)}</td><td class="num">${r.b_calls == null ? "" : f(r.b_calls, 0)}</td></tr>`).join("")}</tbody></table>`;
+  };
+  $("#kq").oninput = draw; draw();
+}
+
+route().catch(e => { $("#main").innerHTML = `<p class="note">${esc(e.message)}</p>`; });
+</script>
+</body>
+</html>

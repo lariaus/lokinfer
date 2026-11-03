@@ -1,0 +1,23 @@
+// RUN: lokinfer-opt --pass=bufferize,plan-memory --stats %s 2>&1 >/dev/null | filecheck %s
+
+// --stats: per-pass time, op counts, and plan-memory's arena size vs the max-live lower bound and the size without
+// reuse. Chain of 4 equal 1 KiB buffers: two live at a time, so the arena (2 KiB) meets the lower bound.
+// CHECK:      lokinfer-opt stats
+// CHECK:      parse
+// CHECK:      bufferize {{.*}} ms + verify {{.*}} ms   init 1 ops, exec 12 ops
+// CHECK:      plan-memory {{.*}} ms + verify {{.*}} ms   init 1 ops, exec 10 ops
+// CHECK-NEXT:   static arena: 2048 bytes for 3 buffers; max-live lower bound 2048, without reuse 3072
+// CHECK:      pipeline {{.*}} ms (passes + verification)
+// CHECK:      exec: buffer.alloc=2 kernel=4 return=1 view=3
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[256]>) {
+    %a = kernel "relu_f32_cpu"(%x) : tensor<f32[256]>
+    %b = kernel "relu_f32_cpu"(%a) : tensor<f32[256]>
+    %c = kernel "relu_f32_cpu"(%b) : tensor<f32[256]>
+    %d = kernel "relu_f32_cpu"(%c) : tensor<f32[256]>
+    return %d
+  }
+}

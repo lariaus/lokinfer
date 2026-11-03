@@ -1,0 +1,22 @@
+// RUN: lokinfer-opt --pass=bufferize,plan-memory %s | filecheck %s
+
+// The reviewer's write-after-read case: %a (CPU) is read by a GPU kernel that
+// is not committed until the sync; %b (CPU, same size) must NOT reuse %a's
+// arena slot before that sync. With the lifetime extension %a and %b overlap.
+// CHECK-LABEL: exec(
+// CHECK:         %a = view %arena[0] : buffer<f32[1024]>
+// CHECK:         %b = view %arena[{{[1-9][0-9]*}}] : buffer<f32[1024]>
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[1024]>, %y: tensor<f32[1024]>) {
+    %a = kernel "add_f32_cpu"(%x, %y) : tensor<f32[1024]>
+    %ag = sync cpu_to_gpu %a : tensor<f32[1024]>
+    %o1 = kernel "mul_f32_gpu"(%ag, %ag) : tensor<f32[1024]>
+    %b = kernel "mul_f32_cpu"(%x, %x) : tensor<f32[1024]>
+    %o1c = sync gpu_to_cpu %o1 : tensor<f32[1024]>
+    %o2 = kernel "add_f32_cpu"(%b, %o1c) : tensor<f32[1024]>
+    return %o2
+  }
+}

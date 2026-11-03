@@ -1,0 +1,18 @@
+// RUN: lokinfer-opt --pass=bufferize,hoist-init %s | filecheck %s
+
+// A kernel with no operands but a dim attr referencing an exec input symbol
+// must stay in exec (its size is only known per call).
+// CHECK-LABEL: init -> buffer<f32[8]> {
+// CHECK-NOT:     kernel
+// CHECK-LABEL: exec(
+// CHECK:         kernel "iota_f32_cpu"() outs(%r{{.*}}) {len = dim<N>}
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[N]>) {
+    %r = kernel "iota_f32_cpu"() {len = dim<N>} : tensor<f32[8]>
+    %o = kernel "copy_f32_cpu"(%r) : tensor<f32[8]>
+    return %o
+  }
+}

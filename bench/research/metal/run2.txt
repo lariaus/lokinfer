@@ -1,0 +1,57 @@
+== A. 1-dispatch cb latency decomposition (us): commit->GPUStart, GPU, GPUEnd->CPU wake ==
+ -- idle 3ms before
+    commit -> GPUStartTime                                     med   442.459 us  p10   370.000  p90  1047.750  min   133.792
+    GPU duration                                               med    10.208 us  p10     9.292  p90    11.292  min     8.625
+    GPUEndTime -> CPU sees event (spin)                        med    15.958 us  p10    14.583  p90    24.291  min     8.333
+    total commit -> CPU wake                                   med   472.917 us  p10   407.458  p90  1116.000  min   157.667
+ -- back-to-back (prev rep just finished)
+    commit -> GPUStartTime                                     med   127.292 us  p10   107.459  p90   221.542  min    87.542
+    GPU duration                                               med     7.667 us  p10     7.042  p90     8.000  min     6.750
+    GPUEndTime -> CPU sees event (spin)                        med    15.250 us  p10    13.125  p90    19.208  min     7.916
+    total commit -> CPU wake                                   med   152.625 us  p10   130.083  p90   279.750  min   119.917
+ -- right after 64MB copy kernel (GPU hot)
+    commit -> GPUStartTime                                     med   164.375 us  p10   125.208  p90   477.250  min    97.875
+    GPU duration                                               med     7.667 us  p10     7.458  p90     8.375  min     7.250
+    GPUEndTime -> CPU sees event (spin)                        med    14.500 us  p10    13.333  p90    18.541  min     8.416
+    total commit -> CPU wake                                   med   190.458 us  p10   148.042  p90   512.000  min   114.625
+
+== B. Warm steady state: 40 back-to-back cbs of 200 tiny dispatches; per-dispatch GPU time ==
+classic concurrent enc, chain + memoryBarrier    gpu/disp      med     3.891 us  p10     3.655  p90     3.940  min     3.552
+                                                               cpu encode 1.218 us/disp, wall 1.503 us/disp (8000 disp)
+classic concurrent enc, independent              gpu/disp      med     0.259 us  p10     0.234  p90     0.281  min     0.223
+                                                               cpu encode 0.403 us/disp, wall 0.429 us/disp (8000 disp)
+classic serial enc, chain (implicit)             gpu/disp      med     2.990 us  p10     2.867  p90     3.563  min     2.700
+                                                               cpu encode 0.383 us/disp, wall 1.101 us/disp (8000 disp)
+classic ICB replay, chain (setBarrier)           gpu/disp      med     2.594 us  p10     2.251  p90     2.752  min     2.138
+                                                               cpu encode 0.121 us/disp, wall 4.277 us/disp (8000 disp)
+classic ICB replay, independent                  gpu/disp      med     0.285 us  p10     0.249  p90     0.314  min     0.245
+                                                               cpu encode 0.061 us/disp, wall 2.491 us/disp (8000 disp)
+classic 1 encoder per dispatch, chain            gpu/disp      med     2.074 us  p10     1.875  p90     2.120  min     1.832
+                                                               cpu encode 1.027 us/disp, wall 1.092 us/disp (8000 disp)
+MTL4 chain + barrierAfterEncoderStages           gpu/disp      med     2.053 us  p10     1.954  p90     2.338  min     1.653
+                                                               cpu encode 0.467 us/disp, wall 0.855 us/disp (8000 disp)
+MTL4 independent                                 gpu/disp      med     0.191 us  p10     0.163  p90     0.204  min     0.157
+                                                               cpu encode 0.324 us/disp, wall 0.343 us/disp (8000 disp)
+MTL4 ICB replay chain                            gpu/disp      med     2.746 us  p10     2.637  p90     2.803  min     2.627
+                                                               cpu encode 0.052 us/disp, wall 1.301 us/disp (8000 disp)
+MTL4 1 encoder per dispatch + queue barrier      gpu/disp      med    33.516 us  p10    28.773  p90    50.586  min    27.159
+                                                               cpu encode 2.554 us/disp, wall 43.261 us/disp (8000 disp)
+
+== C. Mid-graph CPU sync cost (warm): 30 segments x 100 chained dispatches ==
+no sync (pipelined)                                per seg     med   194.333 us  p10   133.718  p90   232.893  min   133.718
+sync each segment: event spin, encode after        per seg     med  1008.339 us  p10   804.454  p90  1752.279  min   804.454
+sync each segment: event waitUntilSignaledValue    per seg     med   769.067 us  p10   682.118  p90  1422.224  min   682.118
+sync each segment: event spin, next cb pre-encoded per seg     med   651.265 us  p10   593.947  p90   725.969  min   593.947
+sync each segment: waitUntilCompleted              per seg     med   936.865 us  p10   828.349  p90  1099.472  min   828.349
+
+== D. Timestamps ==
+ MTL4 Relaxed, 8 x 64MB copy kernels (each ~0.4ms): per-kernel us: 3163.4 0.0 -1446346890227.3 0.0 0.0 0.0 0.0 0.0
+   raw: 34712325289534 34712325365456 34712325365456 34712325365456 34712325365456 0 0 0 0 0 0 0 0 0 0 0 34712325365654
+ MTL4 Precise, 8 x 64MB copy kernels (each ~0.4ms): per-kernel us: 400.2 392.9 394.3 395.3 395.9 389.8 387.9 391.2
+   raw: 34712325418397 34712325428001 34712325435482 34712325444911 34712325444940 34712325454404 34712325454421 34712325463908 34712325463932 34712325473433 34712325473450 34712325482804 34712325482831 34712325492141 34712325492159 34712325501549 34712325501740
+ counter set: timestamp
+ classic 1 enc/kernel, no ts: cb gpu/disp                      med     3.393 us  p10     3.156  p90     3.604  min     3.111
+ classic 1 enc/kernel WITH stage-boundary ts: cb gpu/disp      med    12.240 us  p10    11.329  p90    15.028  min    10.822
+ classic stage-boundary ts: per-encoder delta (tiny)           med   298.583 us  p10   281.250  p90   317.708  min   263.917
+
+done

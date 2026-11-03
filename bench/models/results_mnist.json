@@ -1,0 +1,32 @@
+{
+  "machine": {
+    "low_power_mode": false,
+    "thermal": "Note: No CPU power status has been recorded"
+  },
+  "rows": [
+    {
+      "B": 1,
+      "torch-cpu": 2.0280889069668203e-05,
+      "torch-mps": 0.0002933195661196914,
+      "lokinfer-cpu": 9.458339566587388e-06,
+      "lokinfer-cpu-accelerate": 3.5517669968752452e-06,
+      "lokinfer-gpu": 0.00013911081124332888
+    },
+    {
+      "B": 64,
+      "torch-cpu": 4.2215212948401434e-05,
+      "torch-mps": 0.00034019454069748206,
+      "lokinfer-cpu": 4.464077975877798e-05,
+      "lokinfer-cpu-accelerate": 1.9954930652782268e-05,
+      "lokinfer-gpu": 0.00013706541736610233
+    },
+    {
+      "B": 1024,
+      "torch-cpu": 0.000344993517704803,
+      "torch-mps": 0.00038086795408203984,
+      "lokinfer-cpu": 0.0005322716700727115,
+      "lokinfer-cpu-accelerate": 0.00020933773643760518,
+      "lokinfer-gpu": 0.00014973552652487629
+    }
+  ]
+}

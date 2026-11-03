@@ -1,0 +1,4 @@
+#!/bin/sh
+# Prints a machine-local setting (lokinfer.local.json or its environment variable; python/lokinfer/localconfig.py).
+# Usage: scripts/lk-config KEY
+exec python3 -I "$(dirname "$0")/../python/lokinfer/localconfig.py" "$@"

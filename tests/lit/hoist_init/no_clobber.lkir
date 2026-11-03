@@ -1,0 +1,22 @@
+// RUN: lokinfer-opt --pass=bufferize,hoist-init %s | filecheck %s
+
+// %acc is filled from a constant but then updated in place per call: the fill
+// must NOT be hoisted (init contents would be clobbered after the first call).
+// CHECK-LABEL: init -> (buffer<f32[1]>, buffer<f32[8]>) {
+// CHECK-NOT:     kernel
+// CHECK:         return
+// CHECK-LABEL: exec(
+// CHECK:         kernel "fill_f32_cpu"(%c{{.*}}) outs(%acc
+// CHECK:         kernel "accum_f32_cpu"(%x
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[8]>) {
+    %c = const.inline dense<[0.0]> : tensor<f32[1]>
+    %acc = kernel "fill_f32_cpu"(%c) : tensor<f32[8]>
+    %acc2 = kernel "accum_f32_cpu"(%x, %acc) {inplace = [0, 1]} : tensor<f32[8]>
+    %o = kernel "copy_f32_cpu"(%acc2) : tensor<f32[8]>
+    return %o
+  }
+}

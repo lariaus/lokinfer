@@ -1,0 +1,15 @@
+W1101 12:11:46.734000 43012 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+<venv>/lib/python3.14/site-packages/torch/nn/modules/rnn.py:1011: UserWarning: dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1, but got dropout=0.2 and num_layers=1
+  super().__init__("LSTM", *args, **kwargs)
+<venv>/lib/python3.14/site-packages/torch/nn/utils/weight_norm.py:145: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+<venv>/lib/python3.14/site-packages/torch/_inductor/lowering.py:2774: UserWarning: Torchinductor does not support code generation for complex operators. Performance may be worse than eager.
+  warnings.warn(
+{"dev": "cpu", "mode": "default", "case": "rand16", "warmup_s": 58.84, "median_ms": 262.1, "min_ms": 253.1}
+{"dev": "cpu", "mode": "default", "case": "rand64", "warmup_s": 0.99, "median_ms": 505.4, "min_ms": 483.5}
+{"dev": "cpu", "mode": "default", "case": "rand128", "warmup_s": 1.97, "median_ms": 1033.2, "min_ms": 978.2}
+{"dev": "cpu", "mode": "default", "case": "rand256", "warmup_s": 3.68, "median_ms": 1642.8, "min_ms": 1616.3}
+{"dev": "cpu", "mode": "default", "case": "rand510", "warmup_s": 5.65, "median_ms": 2792.9, "min_ms": 2759.7}
+{"dev": "cpu", "mode": "default", "case": "real_short28", "warmup_s": 0.57, "median_ms": 282.6, "min_ms": 281.7}
+{"dev": "cpu", "mode": "default", "case": "real_medium117", "warmup_s": 1.62, "median_ms": 784.8, "min_ms": 775.0}
+{"dev": "cpu", "mode": "default", "case": "real_long394", "warmup_s": 4.76, "median_ms": 2302.9, "min_ms": 2275.1}

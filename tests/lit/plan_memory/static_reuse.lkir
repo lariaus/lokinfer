@@ -1,0 +1,28 @@
+// RUN: lokinfer-opt --pass=bufferize,plan-memory %s | filecheck %s
+
+// Static intermediates go into one 256-byte-aligned arena; %c reuses %a's
+// slot (disjoint lifetimes), %b doesn't overlap %a (both live at relu).
+// CHECK-LABEL: exec(%x: buffer<f32[16, 64]>) -> buffer<f32[16, 64]> {
+// CHECK-NEXT:    %arena = buffer.alloc {arena = true} : buffer<u8[8192]>
+// CHECK-NEXT:    %a = view %arena[0] : buffer<f32[16, 64]>
+// CHECK-NEXT:    kernel "gemm_f32_cpu"(%x, %x) outs(%a)
+// CHECK-NEXT:    %b = view %arena[1024] : buffer<f32[16, 64]>
+// CHECK-NEXT:    kernel "relu_f32_cpu"(%a) outs(%b)
+// CHECK-NEXT:    %c = view %arena[0] : buffer<f32[16, 64]>
+// CHECK-NEXT:    kernel "relu_f32_cpu"(%b) outs(%c)
+// CHECK-NEXT:    %d = buffer.alloc {output = true} : buffer<f32[16, 64]>
+// CHECK-NEXT:    kernel "softmax_f32_cpu"(%c) outs(%d)
+// CHECK-NEXT:    return %d
+// CHECK-NOT:     buffer.free
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[16, 64]>) {
+    %a = kernel "gemm_f32_cpu"(%x, %x) : tensor<f32[16, 64]>
+    %b = kernel "relu_f32_cpu"(%a) : tensor<f32[16, 64]>
+    %c = kernel "relu_f32_cpu"(%b) : tensor<f32[16, 64]>
+    %d = kernel "softmax_f32_cpu"(%c) : tensor<f32[16, 64]>
+    return %d
+  }
+}

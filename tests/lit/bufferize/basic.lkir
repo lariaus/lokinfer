@@ -1,0 +1,17 @@
+// RUN: lokinfer-opt --pass=bufferize %s | filecheck %s
+
+// Single kernel: result becomes an output alloc passed as outs.
+// CHECK-LABEL: exec(%x: buffer<f32[N]>, %y: buffer<f32[N]>) -> buffer<f32[N]> {
+// CHECK-NEXT:    %out = buffer.alloc {output = true} : buffer<f32[N]>
+// CHECK-NEXT:    kernel "add_f32_cpu"(%x, %y) outs(%out)
+// CHECK-NEXT:    return %out
+// CHECK-NEXT:  }
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[N]>, %y: tensor<f32[N]>) {
+    %out = kernel "add_f32_cpu"(%x, %y) : tensor<f32[N]>
+    return %out
+  }
+}

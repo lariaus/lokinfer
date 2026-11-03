@@ -1,0 +1,4 @@
+#!/bin/sh
+# mlogs-viewer: see docs/profiling.md. Runs with the repo's .venv from any directory.
+ROOT=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+exec "$ROOT/.venv/bin/python" -m lokinfer.prof.cli mlogs-viewer "$@"

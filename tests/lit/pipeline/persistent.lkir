@@ -1,0 +1,26 @@
+// RUN: lokinfer-opt --pipeline %s | filecheck %s
+// A persistent buffer (model-lifetime state, e.g. a KV cache) written in place by an `inout` kernel: bufferize
+// inserts no free for it, plan-memory leaves it out of the arena, hoist-init moves the alloc into init so exec
+// receives it as state; the inout kernel and its reader stay in exec, in order.
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[1, 3]>, %pos: tensor<i64[1]>) {
+    %c = buffer.alloc {device = "cpu", persistent = true} : buffer<f32[8, 1]>
+    kernel "kv_write_f32_cpu"(%c, %c, %x, %pos) {inout = [0, 1]}
+    %y = kernel "attention_decode_f32_cpu"(%x, %c, %c, %pos) {heads = 1} : tensor<f32[1, 1]>
+    return %y
+  }
+}
+
+// CHECK: init -> buffer<f32[8, 1]> {
+// CHECK: [[C:%[a-z0-9_]+]] = buffer.alloc {device = "cpu", persistent = true} : buffer<f32[8, 1]>
+// CHECK-NOT: buffer.free [[C]]
+// CHECK: return [[C]]
+// CHECK: exec(
+// CHECK-SAME: state([[S:%[a-z0-9_]+]]: buffer<f32[8, 1]>)
+// CHECK: kernel "kv_write_f32_cpu"([[S]], [[S]],
+// CHECK: kernel "attention_decode_f32_cpu"({{.*}}[[S]], [[S]],
+// CHECK-NOT: buffer.free [[S]]
+// CHECK: return

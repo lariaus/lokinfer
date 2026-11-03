@@ -1,0 +1,28 @@
+// RUN: lokinfer-opt --pass=bufferize,plan-memory %s | filecheck %s
+
+// Symbolic sizes -> runtime mem.plan at the region start; buffers depending
+// on a data-dependent symbol get a second plan right after its dim.read.
+// CHECK-LABEL: exec(%ids: buffer<i64[T]>) -> buffer<f32[600*F]> {
+// Offsets are element offsets of each buffer's dtype (`elem` lists the element sizes), so views use them as is.
+// CHECK-NEXT:    %arena = mem.plan sizes[512*T, 8] live[0, 7, 2, 8] align 256 -> M0_size, M0_o0, M0_o1 {elem = [4, 8]} : buffer<u8[M0_size]>
+// CHECK-NEXT:    %e = view %arena[M0_o0] : buffer<f32[T, 128]>
+// CHECK:         %d = view %arena[M0_o1] : buffer<i64[1]>
+// CHECK:         dim.read %d[0] -> F
+// CHECK-NEXT:    %arena_1 = mem.plan sizes[512*F, 512*F] {{.*}} -> M1_size, M1_o0, M1_o1 {elem = [4, 4]} : buffer<u8[M1_size]>
+// CHECK-NEXT:    %a = view %arena_1[M1_o0] : buffer<f32[F, 128]>
+// CHECK-NOT:     buffer.free
+// CHECK:         %o = buffer.alloc {output = true} : buffer<f32[600*F]>
+model {
+  init {
+    return
+  }
+  exec(%ids: tensor<i64[T]>) {
+    %e = kernel "embed_f32_cpu"(%ids) : tensor<f32[T, 128]>
+    %d = kernel "durations_i64_cpu"(%e) : tensor<i64[1]>
+    dim.read %d[0] -> F
+    %a = kernel "expand_f32_cpu"(%e, %d) : tensor<f32[F, 128]>
+    %b = kernel "relu_f32_cpu"(%a) : tensor<f32[F, 128]>
+    %o = kernel "decode_f32_cpu"(%b) : tensor<f32[F*600]>
+    return %o
+  }
+}

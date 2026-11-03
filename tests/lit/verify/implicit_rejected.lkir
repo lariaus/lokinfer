@@ -1,0 +1,12 @@
+// RUN: not lokinfer-opt %s 2>&1 | filecheck %s
+// CHECK: kernel 'topk_f32_cpu' runs on cpu but operand %a is resident on gpu; add ops.to_cpu(...)
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[8, 8]>) {
+    %a = kernel "gemm_f32_gpu"(%x, %x) : tensor<f32[8, 8]>
+    %b = kernel "topk_f32_cpu"(%a) : tensor<f32[8, 8]>
+    return %b
+  }
+}

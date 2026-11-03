@@ -1,0 +1,29 @@
+// RUN: lokinfer-opt --pass=bufferize %s | filecheck %s
+
+// (1) No in-place reuse when another operand aliases the destination (a view
+//     of %a): the kernel would read its own output.
+// (2) In-place chains reuse all the way down (lifetime extended after rename).
+// CHECK-LABEL: exec(
+// CHECK:         %a = buffer.alloc : buffer<f32[16]>
+// CHECK:         %v = view %a[0] : buffer<f32[16]>
+// CHECK-NEXT:    %b = buffer.alloc {output = true} : buffer<f32[16]>
+// CHECK-NEXT:    kernel "mix_f32_cpu"(%a, %v) outs(%b)
+// CHECK-NEXT:    buffer.free %a
+// CHECK-NEXT:    kernel "relu_f32_cpu"(%b) outs(%b)
+// CHECK-NEXT:    kernel "neg_f32_cpu"(%b) outs(%b)
+// CHECK-NEXT:    kernel "exp_f32_cpu"(%b) outs(%b)
+// CHECK-NEXT:    return %b
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[16]>) {
+    %a = kernel "copy_f32_cpu"(%x) : tensor<f32[16]>
+    %v = view %a[0] : tensor<f32[16]>
+    %b = kernel "mix_f32_cpu"(%a, %v) {inplace = [0, 0]} : tensor<f32[16]>
+    %c = kernel "relu_f32_cpu"(%b) {inplace = [0, 0]} : tensor<f32[16]>
+    %d = kernel "neg_f32_cpu"(%c) {inplace = [0, 0]} : tensor<f32[16]>
+    %e = kernel "exp_f32_cpu"(%d) {inplace = [0, 0]} : tensor<f32[16]>
+    return %e
+  }
+}

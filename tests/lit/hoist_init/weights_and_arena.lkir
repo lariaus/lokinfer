@@ -1,0 +1,34 @@
+// RUN: lokinfer-opt --pass=bufferize,plan-memory,hoist-init %s | filecheck %s
+
+// Weight transform + its temporary + the static arena move to init; the
+// temporary is freed in init; per-call kernels stay in exec, including ones
+// reading per-call scratch (%a) and the nohoist RNG kernel.
+// CHECK-LABEL: init -> (buffer<f16[64, 64]>, buffer<f16[16, 64]>, buffer<f16[16, 64]>, buffer<f16[16, 64]>) {
+// CHECK:         %arena = buffer.alloc {arena = true}
+// CHECK:         %w = const.internal @"w" : buffer<f32[64, 64]>
+// CHECK-NEXT:    %wh = buffer.alloc : buffer<f16[64, 64]>
+// CHECK-NEXT:    kernel "cast_f32_f16_cpu"(%w) outs(%wh)
+// CHECK-NEXT:    %wt = buffer.alloc : buffer<f16[64, 64]>
+// CHECK-NEXT:    kernel "transpose_f16_cpu"(%wh) outs(%wt)
+// CHECK-NEXT:    buffer.free %wh
+// CHECK:         return %wt,
+// CHECK-LABEL: exec(%x: buffer<f16[16, 64]>) state(%wt_1: buffer<f16[64, 64]>
+// CHECK-NEXT:    kernel "gemm_f16_cpu"(%x, %wt_1) outs(%a_1)
+// CHECK-NEXT:    kernel "rand_f16_cpu"() outs(%n_1) {nohoist = true}
+// CHECK-NEXT:    kernel "add_f16_cpu"(%a_1, %n_1) outs(%s_1)
+// CHECK:         return %o
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f16[16, 64]>) {
+    %w = const.internal @"w" : tensor<f32[64, 64]>
+    %wh = kernel "cast_f32_f16_cpu"(%w) : tensor<f16[64, 64]>
+    %wt = kernel "transpose_f16_cpu"(%wh) : tensor<f16[64, 64]>
+    %a = kernel "gemm_f16_cpu"(%x, %wt) : tensor<f16[16, 64]>
+    %n = kernel "rand_f16_cpu"() {nohoist = true} : tensor<f16[16, 64]>
+    %s = kernel "add_f16_cpu"(%a, %n) : tensor<f16[16, 64]>
+    %o = kernel "relu_f16_cpu"(%s) : tensor<f16[16, 64]>
+    return %o
+  }
+}

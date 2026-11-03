@@ -1,0 +1,179 @@
+Device: Apple M2 Max
+supportsFamily: Apple7 1 Apple8 1 Apple9 0 Apple10 0 Apple11 0 Metal3 1 Metal4 1
+counterSampling: stage 1 draw 0 dispatch 0 tileDispatch 0 blit 0
+timestampFrequency 24000000 Hz, maxBufferLength 20.1 GB, recommendedMaxWorkingSet 26.8 GB, hasUnifiedMemory 1
+timestamp entry size 8
+
+== 1. Submit -> completion round trip (classic MTLCommandQueue) ==
+empty cb, commit+waitUntilCompleted                            med    25.458 us  p10    14.833  p90    43.208  min    12.208
+1 tiny dispatch, commit+waitUntilCompleted                     med   132.250 us  p10   123.792  p90   204.500  min    87.875
+empty cb (unretained refs), commit+wait                        med    16.167 us  p10    13.625  p90    52.333  min    11.625
+1 tiny dispatch (unretained), commit+wait                      med   140.125 us  p10   130.167  p90   384.417  min   107.583
+1 tiny dispatch, commit + spin on cb.status                    med   286.542 us  p10   168.333  p90  1192.792  min   130.667
+1 tiny dispatch, MTLSharedEvent waitUntilSignaledValue         med   121.125 us  p10    94.083  p90   232.208  min    78.208
+1 tiny dispatch, MTLSharedEvent spin on signaledValue          med   117.250 us  p10    79.917  p90   257.875  min    65.125
+
+== 1b. Submit -> completion round trip (MTL4CommandQueue) ==
+MTL4 empty cb, signalEvent + waitUntilSignaledValue            med    23.292 us  p10    18.625  p90    47.417  min    14.292
+MTL4 1 tiny dispatch, waitUntilSignaledValue                   med   138.250 us  p10   116.792  p90   234.250  min    90.708
+MTL4 empty cb, spin on signaledValue                           med    20.458 us  p10    11.667  p90    31.583  min     5.292
+MTL4 1 tiny dispatch, spin on signaledValue                    med   116.125 us  p10    90.792  p90   405.792  min    78.292
+
+== 2. N tiny dispatches (256 threads each): CPU encode cost per dispatch, and GPU time ==
+   (cpu = cb creation .. commit returns; gpu = GPUEndTime-GPUStartTime; wall = cpu start .. completion)
+N=  10 serial enc, tracked, chain                   cpu/disp   med     0.792 us  p10     0.683  p90     1.492  min     0.642
+N=  10 serial enc, tracked, chain                   gpu/disp   med     3.813 us  p10     3.600  p90     4.004  min     3.462
+N=  10 serial enc, tracked, chain                   wall tot   med   172.542 us  p10   160.500  p90   600.375  min   151.833
+N=  10 serial enc, untracked, chain                 cpu/disp   med     1.392 us  p10     0.796  p90     2.596  min     0.708
+N=  10 serial enc, untracked, chain                 gpu/disp   med     3.829 us  p10     3.633  p90     3.988  min     3.475
+N=  10 serial enc, untracked, chain                 wall tot   med   196.042 us  p10   172.208  p90   495.125  min   158.167
+N=  10 concurrent enc, untracked, independent       cpu/disp   med     1.604 us  p10     1.413  p90     2.704  min     1.329
+N=  10 concurrent enc, untracked, independent       gpu/disp   med     0.942 us  p10     0.887  p90     0.975  min     0.833
+N=  10 concurrent enc, untracked, independent       wall tot   med   188.500 us  p10   175.542  p90   344.625  min   164.583
+N=  10 concurrent enc, untracked, chain+memoryBarrier cpu/disp med     2.075 us  p10     1.821  p90     3.275  min     1.479
+N=  10 concurrent enc, untracked, chain+memoryBarrier gpu/disp med     3.900 us  p10     3.662  p90     4.075  min     3.508
+N=  10 concurrent enc, untracked, chain+memoryBarrier wall tot med   232.750 us  p10   212.708  p90   433.167  min   191.833
+N=  10 1 encoder per dispatch, untracked            cpu/disp   med     1.875 us  p10     1.658  p90     2.867  min     1.571
+N=  10 1 encoder per dispatch, untracked            gpu/disp   med     3.800 us  p10     3.600  p90     3.962  min     3.413
+N=  10 1 encoder per dispatch, untracked            wall tot   med   200.875 us  p10   186.000  p90   262.375  min   177.917
+N=  10 MTL4 independent, no barriers                cpu/disp   med     1.642 us  p10     1.454  p90     2.642  min     1.329
+N=  10 MTL4 independent, no barriers                gpu/disp   med     1.025 us  p10     0.954  p90     1.062  min     0.904
+N=  10 MTL4 independent, no barriers                wall tot   med   164.708 us  p10   154.000  p90   206.167  min   147.167
+N=  10 MTL4 chain + intra-encoder barrier           cpu/disp   med     1.646 us  p10     1.454  p90     3.171  min     1.221
+N=  10 MTL4 chain + intra-encoder barrier           gpu/disp   med     4.150 us  p10     3.888  p90     4.358  min     3.688
+N=  10 MTL4 chain + intra-encoder barrier           wall tot   med   200.083 us  p10   187.333  p90   296.792  min   179.583
+N= 100 serial enc, tracked, chain                   cpu/disp   med     0.423 us  p10     0.388  p90     0.544  min     0.301
+N= 100 serial enc, tracked, chain                   gpu/disp   med     3.396 us  p10     3.204  p90     3.586  min     3.025
+N= 100 serial enc, tracked, chain                   wall tot   med   537.542 us  p10   508.042  p90   646.125  min   483.000
+N= 100 serial enc, untracked, chain                 cpu/disp   med     0.445 us  p10     0.395  p90     0.665  min     0.304
+N= 100 serial enc, untracked, chain                 gpu/disp   med     3.421 us  p10     3.221  p90     3.605  min     3.080
+N= 100 serial enc, untracked, chain                 wall tot   med   547.083 us  p10   514.750  p90   657.333  min   494.833
+N= 100 concurrent enc, untracked, independent       cpu/disp   med     0.420 us  p10     0.397  p90     0.596  min     0.297
+N= 100 concurrent enc, untracked, independent       gpu/disp   med     0.333 us  p10     0.295  p90     0.345  min     0.259
+N= 100 concurrent enc, untracked, independent       wall tot   med   241.625 us  p10   228.417  p90   320.417  min   213.417
+N= 100 concurrent enc, untracked, chain+memoryBarrier cpu/disp med     0.983 us  p10     0.641  p90     1.278  min     0.499
+N= 100 concurrent enc, untracked, chain+memoryBarrier gpu/disp med     3.523 us  p10     3.279  p90     3.701  min     3.139
+N= 100 concurrent enc, untracked, chain+memoryBarrier wall tot med   644.750 us  p10   597.458  p90   773.208  min   560.667
+N= 100 1 encoder per dispatch, untracked            cpu/disp   med     0.810 us  p10     0.750  p90     1.078  min     0.616
+N= 100 1 encoder per dispatch, untracked            gpu/disp   med     3.422 us  p10     3.228  p90     3.591  min     3.087
+N= 100 1 encoder per dispatch, untracked            wall tot   med   584.083 us  p10   546.833  p90   727.583  min   517.875
+N= 100 MTL4 independent, no barriers                cpu/disp   med     0.331 us  p10     0.312  p90     0.442  min     0.302
+N= 100 MTL4 independent, no barriers                gpu/disp   med     0.333 us  p10     0.297  p90     0.347  min     0.260
+N= 100 MTL4 independent, no barriers                wall tot   med   206.750 us  p10   196.583  p90   245.667  min   169.875
+N= 100 MTL4 chain + intra-encoder barrier           cpu/disp   med     0.403 us  p10     0.357  p90     0.709  min     0.268
+N= 100 MTL4 chain + intra-encoder barrier           gpu/disp   med     3.671 us  p10     3.490  p90     3.854  min     3.337
+N= 100 MTL4 chain + intra-encoder barrier           wall tot   med   561.583 us  p10   528.458  p90   666.167  min   505.458
+N=1000 serial enc, tracked, chain                   cpu/disp   med     0.300 us  p10     0.184  p90     0.326  min     0.166
+N=1000 serial enc, tracked, chain                   gpu/disp   med     2.018 us  p10     1.680  p90     3.401  min     1.509
+N=1000 serial enc, tracked, chain                   wall tot   med  2517.625 us  p10  2157.292  p90  3960.208  min  2006.417
+N=1000 serial enc, untracked, chain                 cpu/disp   med     0.193 us  p10     0.169  p90     0.332  min     0.162
+N=1000 serial enc, untracked, chain                 gpu/disp   med     2.106 us  p10     1.695  p90     3.240  min     1.616
+N=1000 serial enc, untracked, chain                 wall tot   med  2734.000 us  p10  2137.125  p90  3748.125  min  1987.750
+N=1000 concurrent enc, untracked, independent       cpu/disp   med     0.267 us  p10     0.232  p90     0.344  min     0.227
+N=1000 concurrent enc, untracked, independent       gpu/disp   med     0.243 us  p10     0.184  p90     0.276  min     0.146
+N=1000 concurrent enc, untracked, independent       wall tot   med   745.042 us  p10   645.083  p90  1078.667  min   564.042
+N=1000 concurrent enc, untracked, chain+memoryBarrier cpu/disp med     0.561 us  p10     0.435  p90     0.974  min     0.405
+N=1000 concurrent enc, untracked, chain+memoryBarrier gpu/disp med     3.559 us  p10     3.371  p90     3.734  min     3.265
+N=1000 concurrent enc, untracked, chain+memoryBarrier wall tot med  4723.208 us  p10  4294.917  p90  5223.333  min  4038.125
+N=1000 1 encoder per dispatch, untracked            cpu/disp   med     0.712 us  p10     0.463  p90     0.977  min     0.448
+N=1000 1 encoder per dispatch, untracked            gpu/disp   med     3.377 us  p10     3.189  p90     3.598  min     3.123
+N=1000 1 encoder per dispatch, untracked            wall tot   med  4606.500 us  p10  4076.208  p90  7298.625  min  3794.458
+N=1000 MTL4 independent, no barriers                cpu/disp   med     0.131 us  p10     0.121  p90     0.165  min     0.117
+N=1000 MTL4 independent, no barriers                gpu/disp   med     0.255 us  p10     0.226  p90     0.279  min     0.195
+N=1000 MTL4 independent, no barriers                wall tot   med   554.750 us  p10   508.833  p90   648.125  min   464.042
+N=1000 MTL4 chain + intra-encoder barrier           cpu/disp   med     0.294 us  p10     0.223  p90     0.396  min     0.184
+N=1000 MTL4 chain + intra-encoder barrier           gpu/disp   med     2.439 us  p10     1.798  p90     3.706  min     1.660
+N=1000 MTL4 chain + intra-encoder barrier           wall tot   med  3366.125 us  p10  2325.458  p90  4688.083  min  2054.292
+
+== 3. Indirect command buffer: record once, replay ==
+N=  10 independent: ICB record (CPU) total 17.4 us = 1.742 us/cmd
+   ICB per-command single setKernelBuffer update (CPU)         med     0.083 us  p10     0.042  p90     0.083  min     0.042
+N=  10 classic ICB replay indep              cpu total         med    18.417 us  p10    12.500  p90    36.750  min    11.250
+N=  10 classic ICB replay indep              gpu/disp          med     1.575 us  p10     1.271  p90     1.925  min     1.075
+N=  10 classic ICB replay indep              wall tot          med   216.333 us  p10   187.542  p90   287.042  min   173.333
+N=  10 MTL4 ICB replay indep                 cpu total         med    19.458 us  p10    13.833  p90    33.458  min    12.375
+N=  10 MTL4 ICB replay indep                 gpu/disp          med     2.333 us  p10     2.125  p90     2.438  min     1.762
+N=  10 MTL4 ICB replay indep                 wall tot          med   189.292 us  p10   170.958  p90   241.667  min   160.042
+N=  10 chain(setBarrier): ICB record (CPU) total 6.0 us = 0.604 us/cmd
+   ICB per-command single setKernelBuffer update (CPU)         med     0.083 us  p10     0.042  p90     0.083  min     0.042
+N=  10 classic ICB replay chain              cpu total         med    16.625 us  p10    12.667  p90    32.167  min    11.167
+N=  10 classic ICB replay chain              gpu/disp          med     6.067 us  p10     5.712  p90     6.308  min     5.538
+N=  10 classic ICB replay chain              wall tot          med   252.042 us  p10   230.833  p90   502.625  min   216.708
+N=  10 MTL4 ICB replay chain                 cpu total         med    18.958 us  p10    14.500  p90    34.042  min    12.917
+N=  10 MTL4 ICB replay chain                 gpu/disp          med     6.096 us  p10     5.746  p90     6.313  min     5.533
+N=  10 MTL4 ICB replay chain                 wall tot          med   229.958 us  p10   211.458  p90   304.708  min   200.667
+N= 100 independent: ICB record (CPU) total 12.7 us = 0.127 us/cmd
+   ICB per-command single setKernelBuffer update (CPU)         med     0.042 us  p10     0.042  p90     0.083  min     0.042
+N= 100 classic ICB replay indep              cpu total         med    15.542 us  p10    12.042  p90    25.458  min    10.958
+N= 100 classic ICB replay indep              gpu/disp          med     0.614 us  p10     0.499  p90     0.621  min     0.482
+N= 100 classic ICB replay indep              wall tot          med   247.458 us  p10   228.625  p90   290.042  min   210.042
+N= 100 MTL4 ICB replay indep                 cpu total         med    21.000 us  p10    13.583  p90    45.833  min     9.917
+N= 100 MTL4 ICB replay indep                 gpu/disp          med     0.609 us  p10     0.518  p90     0.619  min     0.489
+N= 100 MTL4 ICB replay indep                 wall tot          med   246.000 us  p10   216.250  p90   321.542  min   198.750
+N= 100 chain(setBarrier): ICB record (CPU) total 18.0 us = 0.180 us/cmd
+   ICB per-command single setKernelBuffer update (CPU)         med     0.083 us  p10     0.042  p90     0.083  min     0.042
+N= 100 classic ICB replay chain              cpu total         med    25.042 us  p10    15.958  p90    46.500  min     9.708
+N= 100 classic ICB replay chain              gpu/disp          med     4.668 us  p10     4.432  p90     4.846  min     4.296
+N= 100 classic ICB replay chain              wall tot          med   704.375 us  p10   666.292  p90   806.958  min   630.167
+N= 100 MTL4 ICB replay chain                 cpu total         med    19.208 us  p10    11.208  p90    53.625  min     8.750
+N= 100 MTL4 ICB replay chain                 gpu/disp          med     4.675 us  p10     4.426  p90     4.845  min     4.318
+N= 100 MTL4 ICB replay chain                 wall tot          med   660.083 us  p10   620.083  p90   840.875  min   594.042
+N=1000 independent: ICB record (CPU) total 115.3 us = 0.115 us/cmd
+   ICB per-command single setKernelBuffer update (CPU)         med     0.042 us  p10     0.042  p90     0.083  min     0.042
+N=1000 classic ICB replay indep              cpu total         med    18.667 us  p10    12.042  p90    36.667  min     7.750
+N=1000 classic ICB replay indep              gpu/disp          med     0.438 us  p10     0.359  p90     0.441  min     0.341
+N=1000 classic ICB replay indep              wall tot          med   654.542 us  p10   587.000  p90   757.000  min   518.708
+N=1000 MTL4 ICB replay indep                 cpu total         med    22.167 us  p10    13.000  p90    51.083  min    10.667
+N=1000 MTL4 ICB replay indep                 gpu/disp          med     0.439 us  p10     0.353  p90     0.441  min     0.331
+N=1000 MTL4 ICB replay indep                 wall tot          med   626.417 us  p10   540.250  p90   797.958  min   500.458
+N=1000 chain(setBarrier): ICB record (CPU) total 136.4 us = 0.136 us/cmd
+   ICB per-command single setKernelBuffer update (CPU)         med     0.083 us  p10     0.042  p90     0.083  min     0.000
+N=1000 classic ICB replay chain              cpu total         med    49.792 us  p10    27.458  p90    84.375  min    15.375
+N=1000 classic ICB replay chain              gpu/disp          med     1.830 us  p10     1.716  p90     2.341  min     1.659
+N=1000 classic ICB replay chain              wall tot          med  2219.375 us  p10  2001.375  p90  4361.167  min  1918.167
+N=1000 MTL4 ICB replay chain                 cpu total         med    40.708 us  p10    27.667  p90    68.583  min    15.625
+N=1000 MTL4 ICB replay chain                 gpu/disp          med     2.265 us  p10     1.855  p90     2.792  min     1.765
+N=1000 MTL4 ICB replay chain                 wall tot          med  2569.167 us  p10  2103.375  p90  3129.875  min  1981.667
+
+== 4. Data-dependent size: GPU-driven indirect dispatch vs CPU readback vs upper-bound grid ==
+produce -> indirect consume, 1 cb (GPU-driven)                 med   228.833 us  p10   193.042  p90   341.417  min   165.042
+produce, commit+wait, read n, consume cb (readback)            med   378.542 us  p10   319.583  p90   484.208  min   262.375
+produce -> upper-bound grid consume, 1 cb                      med   171.250 us  p10   152.875  p90   240.542  min   141.500
+200-dispatch chain, 2 cbs pipelined (no mid wait)              med   604.792 us  p10   561.167  p90   755.375  min   535.667
+200-dispatch chain, 2 cbs with CPU wait in the middle          med  1232.750 us  p10  1130.875  p90  1448.542  min  1076.000
+
+== 5. CPU signal -> GPU wake (cb waits on MTLSharedEvent set by CPU) ==
+CPU setSignaledValue -> GPU runs 1 tiny dispatch -> CPU sees signal (spin) med   116.750 us  p10   104.500  p90   183.625  min    93.042
+
+== 6. MTL4 counter heap timestamps around each dispatch ==
+   first ts values: 34709465650995 34709465660004 34709465660004 (entry stride assumed 8B; data len 1600)
+Relaxed: per-dispatch ts delta (tiny kernel)                   med     0.000 us  p10     0.000  p90     0.000  min     0.000
+Relaxed: first..last ts span, 100 dispatches                   med 768612890176797440.000 us  p10 768612890176772224.000  p90 768612890176823040.000  min 768612890176765568.000
+Relaxed: cb GPUEnd-GPUStart (feedback)                         med   359.708 us  p10   342.375  p90   378.375  min   330.125
+   first ts values: 34709468030901 34709468031105 34709468031123 (entry stride assumed 8B; data len 1600)
+Precise: per-dispatch ts delta (tiny kernel)                   med     7.042 us  p10     6.750  p90     7.458  min     6.458
+Precise: first..last ts span, 100 dispatches                   med  2786.125 us  p10  2450.417  p90  3321.375  min  2184.667
+Precise: cb GPUEnd-GPUStart (feedback)                         med  2786.125 us  p10  2450.375  p90  3321.375  min  2184.625
+
+== 7. Memory: bandwidth of shared vs private vs no-copy mmapped buffers (copy & read kernels) ==
+   copy  shared  -> shared  (r+w GB/s)                  first run 336.4 GB/s
+copy  shared  -> shared  (r+w GB/s)                            med   332.582 GB/s  p10   289.431  p90   347.883  min   256.938
+   copy  private -> private (r+w GB/s)                  first run 331.7 GB/s
+copy  private -> private (r+w GB/s)                            med   330.357 GB/s  p10   277.327  p90   341.766  min   239.167
+   read  shared             (GB/s)                      first run 271.5 GB/s
+read  shared             (GB/s)                                med   321.913 GB/s  p10   207.359  p90   363.611  min   175.635
+   read  private            (GB/s)                      first run 225.4 GB/s
+read  private            (GB/s)                                med   320.663 GB/s  p10   243.029  p90   332.411  min   206.257
+   newBufferWithBytesNoCopy on PROT_READ|WRITE MAP_PRIVATE file mmap (256MB): OK, 91.8 us, contents()==ptr 1
+   read  nocopy mmap (RW)         (GB/s)                first run 303.3 GB/s
+read  nocopy mmap (RW)         (GB/s)                          med   323.904 GB/s  p10   247.806  p90   336.561  min   172.618
+   newBufferWithBytesNoCopy on PROT_READ MAP_PRIVATE file mmap (256MB): OK, 55.8 us, contents()==ptr 1
+   read  nocopy mmap (PROT_READ)  (GB/s)                first run 304.3 GB/s
+read  nocopy mmap (PROT_READ)  (GB/s)                          med   321.720 GB/s  p10   260.870  p90   344.535  min   216.888
+
+== 8. MTLHeap placement + aliasing sanity ==
+   placement heap 64MB: OK
+   two placement buffers at offset 0: b1 0x7bfd08ddc0 b2 0x7bfd08df80, gpuAddress equal 1, contents equal 1
+   heapBufferSizeAndAlign(1MB): size 1048576 align 256
+
+done

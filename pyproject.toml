@@ -1,0 +1,29 @@
+[build-system]
+requires = ["scikit-build-core==1.1.1", "nanobind==3.1.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "lokinfer"
+version = "0.0.1"
+description = "ML inference framework for macOS/iOS (CPU + Metal GPU)"
+requires-python = ">=3.14"
+dependencies = ["numpy"]
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+build-dir = "build/py-{wheel_tag}"
+cmake.build-type = "Release"
+ninja.make-fallback = false
+wheel.packages = ["python/lokinfer"]
+editable.mode = "redirect"
+editable.rebuild = true
+
+[tool.scikit-build.cmake.define]
+LOKINFER_BUILD_PYTHON = "ON"
+LOKINFER_BUILD_TESTS = "OFF"
+LOKINFER_BUILD_BENCH = "OFF"
+CMAKE_OSX_DEPLOYMENT_TARGET = "27.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python", "tests/models", "tests/kernels", "tests/tools"]
+markers = ["slow: needs downloads or takes > 1 s"]

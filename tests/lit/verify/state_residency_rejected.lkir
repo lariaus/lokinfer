@@ -1,0 +1,16 @@
+// RUN: not lokinfer-opt %s 2>&1 | filecheck %s
+
+// A GPU constant hoisted into init reaches exec as state: it keeps its GPU residency there, so a CPU kernel may
+// not read it without a sync.
+// CHECK: kernel 'add_f32_cpu' runs on cpu but operand %s is resident on gpu
+model {
+  init -> buffer<f32[4]> {
+    %w = const.inline dense<[1.0, 2.0, 3.0, 4.0]> {device = "gpu"} : buffer<f32[4]>
+    return %w
+  }
+  exec(%x: buffer<f32[4]>) state(%s: buffer<f32[4]>) -> buffer<f32[4]> {
+    %o = buffer.alloc {output = true} : buffer<f32[4]>
+    kernel "add_f32_cpu"(%x, %s) outs(%o)
+    return %o
+  }
+}

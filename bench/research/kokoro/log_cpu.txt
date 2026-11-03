@@ -1,0 +1,508 @@
+W1101 11:34:36.442000 23352 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+<venv>/lib/python3.14/site-packages/torch/nn/modules/rnn.py:1011: UserWarning: dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1, but got dropout=0.2 and num_layers=1
+  super().__init__("LSTM", *args, **kwargs)
+<venv>/lib/python3.14/site-packages/torch/nn/utils/weight_norm.py:145: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+torch 2.14.1 threads 8 device cpu
+{"case": "rand16", "T": 18, "F": 74, "samples": 44400, "audio_s": 1.85, "median_ms": 289.68, "min_ms": 288.01, "max_ms": 296.03, "rtf": 0.16}
+{"case": "rand64", "T": 66, "F": 170, "samples": 102000, "audio_s": 4.25, "median_ms": 579.06, "min_ms": 531.84, "max_ms": 602.96, "rtf": 0.14}
+{"case": "rand128", "T": 130, "F": 334, "samples": 200400, "audio_s": 8.35, "median_ms": 1064.74, "min_ms": 1048.27, "max_ms": 1097.48, "rtf": 0.13}
+{"case": "rand256", "T": 258, "F": 680, "samples": 408000, "audio_s": 17.0, "median_ms": 1943.63, "min_ms": 1854.17, "max_ms": 2005.25, "rtf": 0.11}
+{"case": "rand510", "T": 512, "F": 1127, "samples": 676200, "audio_s": 28.18, "median_ms": 3222.14, "min_ms": 3133.84, "max_ms": 3678.69, "rtf": 0.11}
+{"case": "real_short28", "T": 30, "F": 86, "samples": 51600, "audio_s": 2.15, "median_ms": 415.7, "min_ms": 341.11, "max_ms": 451.34, "rtf": 0.19}
+{"case": "real_medium117", "T": 119, "F": 278, "samples": 166800, "audio_s": 6.95, "median_ms": 1314.58, "min_ms": 1108.5, "max_ms": 1749.05, "rtf": 0.19}
+{"case": "real_long394", "T": 396, "F": 935, "samples": 561000, "audio_s": 23.38, "median_ms": 3171.24, "min_ms": 2882.61, "max_ms": 3339.81, "rtf": 0.14}
+USDT:2026-11-01 11:39:39 23352:25968131 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-11-01 11:39:40 23352:25968131 SyncActivityProfilerHandler.cpp:46] profiler_stop
+USDT:2026-11-01 11:39:49 23352:25968131 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-11-01 11:39:52 23352:25968131 SyncActivityProfilerHandler.cpp:46] profiler_stop
+USDT:2026-11-01 11:40:08 23352:25968131 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-11-01 11:40:11 23352:25968131 SyncActivityProfilerHandler.cpp:46] profiler_stop
+
+== modules rand16 (ms, median)
+  bert.embeddings                       0.18
+  bert.encoder                         31.42
+  bert.pooler                           0.06
+  bert                                 31.87
+  bert_encoder                          0.13
+  pred.text_encoder(DurEnc)             5.82
+  pred.lstm                             1.48
+  pred.duration_proj                    0.03
+  pred.shared_lstm                      4.94
+  pred.F0[0]                            2.62
+  pred.F0[1]                            4.10
+  pred.F0[2]                            1.50
+  pred.F0_proj                          0.03
+  pred.N[0]                             1.91
+  pred.N[1]                             4.04
+  pred.N[2]                             1.49
+  pred.N_proj                           0.02
+  text_encoder.cnn[0]                   0.80
+  text_encoder.cnn[1]                   0.79
+  text_encoder.cnn[2]                   0.75
+  text_encoder.lstm                     1.55
+  text_encoder                          3.97
+  dec.encode                            3.44
+  dec.asr_res                           0.10
+  dec.decode[0]                         4.24
+  dec.decode[1]                         4.42
+  dec.decode[2]                         4.72
+  dec.decode[3]                         7.61
+  gen.m_source                         10.74
+  gen.stft.transform                    1.14
+  gen.noise_convs[0]                    0.51
+  gen.noise_res[0]                     16.62
+  gen.ups[0]                            1.74
+  gen.resblocks[0]                     12.10
+  gen.resblocks[1]                     16.21
+  gen.resblocks[2]                     21.92
+  gen.noise_convs[1]                    0.66
+  gen.noise_res[1]                     47.21
+  gen.ups[1]                            3.77
+  gen.resblocks[3]                     22.80
+  gen.resblocks[4]                     30.14
+  gen.resblocks[5]                     41.78
+  gen.conv_post                         1.29
+  gen.stft.inverse                      1.58
+  dec.generator                       231.77
+  decoder                             256.37
+  TOTAL(with hooks)                   313.60
+
+== modules rand64 (ms, median)
+  bert.embeddings                       0.17
+  bert.encoder                         36.37
+  bert.pooler                           0.06
+  bert                                 36.75
+  bert_encoder                          0.20
+  pred.text_encoder(DurEnc)            14.22
+  pred.lstm                             3.93
+  pred.duration_proj                    0.04
+  pred.shared_lstm                      9.11
+  pred.F0[0]                            2.10
+  pred.F0[1]                            4.60
+  pred.F0[2]                            1.68
+  pred.F0_proj                          0.03
+  pred.N[0]                             2.01
+  pred.N[1]                             4.43
+  pred.N[2]                             1.68
+  pred.N_proj                           0.03
+  text_encoder.cnn[0]                   1.06
+  text_encoder.cnn[1]                   0.99
+  text_encoder.cnn[2]                   1.04
+  text_encoder.lstm                     4.02
+  text_encoder                          7.99
+  dec.encode                            3.98
+  dec.asr_res                           0.13
+  dec.decode[0]                         5.23
+  dec.decode[1]                         4.94
+  dec.decode[2]                         4.95
+  dec.decode[3]                         8.78
+  gen.m_source                         23.19
+  gen.stft.transform                    1.82
+  gen.noise_convs[0]                    0.90
+  gen.noise_res[0]                     31.57
+  gen.ups[0]                            3.57
+  gen.resblocks[0]                     19.83
+  gen.resblocks[1]                     31.51
+  gen.resblocks[2]                     43.07
+  gen.noise_convs[1]                    1.58
+  gen.noise_res[1]                     89.47
+  gen.ups[1]                            7.83
+  gen.resblocks[3]                     44.69
+  gen.resblocks[4]                     65.72
+  gen.resblocks[5]                     89.19
+  gen.conv_post                         3.38
+  gen.stft.inverse                      2.45
+  dec.generator                       472.43
+  decoder                             501.46
+  TOTAL(with hooks)                   592.61
+
+== modules rand128 (ms, median)
+  bert.embeddings                       0.25
+  bert.encoder                        150.17
+  bert.pooler                           0.06
+  bert                                150.61
+  bert_encoder                          0.28
+  pred.text_encoder(DurEnc)            35.51
+  pred.lstm                             7.11
+  pred.duration_proj                    0.06
+  pred.shared_lstm                     17.87
+  pred.F0[0]                            7.79
+  pred.F0[1]                           10.82
+  pred.F0[2]                            5.55
+  pred.F0_proj                          0.03
+  pred.N[0]                             8.02
+  pred.N[1]                             9.58
+  pred.N[2]                             7.67
+  pred.N_proj                           0.03
+  text_encoder.cnn[0]                   1.94
+  text_encoder.cnn[1]                   2.42
+  text_encoder.cnn[2]                   1.86
+  text_encoder.lstm                     9.64
+  text_encoder                         18.84
+  dec.encode                           13.80
+  dec.asr_res                           0.17
+  dec.decode[0]                        15.76
+  dec.decode[1]                        16.25
+  dec.decode[2]                        12.53
+  dec.decode[3]                        17.50
+  gen.m_source                         56.04
+  gen.stft.transform                    5.64
+  gen.noise_convs[0]                    3.66
+  gen.noise_res[0]                     92.38
+  gen.ups[0]                            8.93
+  gen.resblocks[0]                     80.74
+  gen.resblocks[1]                    106.77
+  gen.resblocks[2]                    131.02
+  gen.noise_convs[1]                    3.03
+  gen.noise_res[1]                    322.83
+  gen.ups[1]                           18.74
+  gen.resblocks[3]                    189.62
+  gen.resblocks[4]                    264.15
+  gen.resblocks[5]                    322.36
+  gen.conv_post                        10.56
+  gen.stft.inverse                     11.73
+  dec.generator                      1826.78
+  decoder                            1897.43
+  TOTAL(with hooks)                  2141.27
+
+== modules rand256 (ms, median)
+  bert.embeddings                       0.64
+  bert.encoder                        164.13
+  bert.pooler                           0.06
+  bert                                165.13
+  bert_encoder                          0.44
+  pred.text_encoder(DurEnc)            68.76
+  pred.lstm                            17.23
+  pred.duration_proj                    0.10
+  pred.shared_lstm                     37.31
+  pred.F0[0]                           13.48
+  pred.F0[1]                           17.51
+  pred.F0[2]                           10.57
+  pred.F0_proj                          0.07
+  pred.N[0]                             7.71
+  pred.N[1]                            17.02
+  pred.N[2]                             7.85
+  pred.N_proj                           0.06
+  text_encoder.cnn[0]                   5.24
+  text_encoder.cnn[1]                   4.79
+  text_encoder.cnn[2]                   5.50
+  text_encoder.lstm                    16.63
+  text_encoder                         39.60
+  dec.encode                           17.57
+  dec.asr_res                           0.51
+  dec.decode[0]                        21.49
+  dec.decode[1]                        17.22
+  dec.decode[2]                        19.45
+  dec.decode[3]                        27.90
+  gen.m_source                        116.92
+  gen.stft.transform                    7.96
+  gen.noise_convs[0]                    4.29
+  gen.noise_res[0]                    213.32
+  gen.ups[0]                           16.79
+  gen.resblocks[0]                    136.03
+  gen.resblocks[1]                    173.70
+  gen.resblocks[2]                    247.54
+  gen.noise_convs[1]                    6.37
+  gen.noise_res[1]                    662.49
+  gen.ups[1]                           40.11
+  gen.resblocks[3]                    416.23
+  gen.resblocks[4]                    540.33
+  gen.resblocks[5]                    632.62
+  gen.conv_post                        19.52
+  gen.stft.inverse                     14.97
+  dec.generator                      3586.51
+  decoder                            3719.73
+  TOTAL(with hooks)                  4098.22
+
+== modules rand510 (ms, median)
+  bert.embeddings                       0.58
+  bert.encoder                        250.30
+  bert.pooler                           0.22
+  bert                                255.35
+  bert_encoder                          0.53
+  pred.text_encoder(DurEnc)           149.75
+  pred.lstm                            33.72
+  pred.duration_proj                    0.17
+  pred.shared_lstm                     56.95
+  pred.F0[0]                           14.80
+  pred.F0[1]                           21.45
+  pred.F0[2]                           10.51
+  pred.F0_proj                          0.10
+  pred.N[0]                            13.12
+  pred.N[1]                            20.05
+  pred.N[2]                             9.73
+  pred.N_proj                           0.09
+  text_encoder.cnn[0]                   4.71
+  text_encoder.cnn[1]                   4.39
+  text_encoder.cnn[2]                   3.19
+  text_encoder.lstm                    25.90
+  text_encoder                         44.07
+  dec.encode                           24.48
+  dec.asr_res                           0.59
+  dec.decode[0]                        32.25
+  dec.decode[1]                        30.19
+  dec.decode[2]                        22.32
+  dec.decode[3]                        50.91
+  gen.m_source                        207.75
+  gen.stft.transform                   15.00
+  gen.noise_convs[0]                    9.31
+  gen.noise_res[0]                    335.87
+  gen.ups[0]                           32.31
+  gen.resblocks[0]                    222.06
+  gen.resblocks[1]                    297.98
+  gen.resblocks[2]                    435.24
+  gen.noise_convs[1]                    7.09
+  gen.noise_res[1]                    922.41
+  gen.ups[1]                           76.26
+  gen.resblocks[3]                    501.13
+  gen.resblocks[4]                    764.57
+  gen.resblocks[5]                   1330.93
+  gen.conv_post                        37.00
+  gen.stft.inverse                     24.22
+  dec.generator                      5428.06
+  decoder                            5594.87
+  TOTAL(with hooks)                  6421.76
+
+== modules real_short28 (ms, median)
+  bert.embeddings                       0.21
+  bert.encoder                         29.37
+  bert.pooler                           0.08
+  bert                                 29.85
+  bert_encoder                          0.13
+  pred.text_encoder(DurEnc)             7.17
+  pred.lstm                             1.83
+  pred.duration_proj                    0.03
+  pred.shared_lstm                      4.84
+  pred.F0[0]                            2.53
+  pred.F0[1]                            4.38
+  pred.F0[2]                            1.70
+  pred.F0_proj                          0.03
+  pred.N[0]                             2.23
+  pred.N[1]                             4.73
+  pred.N[2]                             1.68
+  pred.N_proj                           0.02
+  text_encoder.cnn[0]                   0.77
+  text_encoder.cnn[1]                   0.75
+  text_encoder.cnn[2]                   0.75
+  text_encoder.lstm                     1.83
+  text_encoder                          4.38
+  dec.encode                            4.56
+  dec.asr_res                           0.11
+  dec.decode[0]                         5.35
+  dec.decode[1]                         5.84
+  dec.decode[2]                         4.66
+  dec.decode[3]                         8.46
+  gen.m_source                         15.45
+  gen.stft.transform                    2.09
+  gen.noise_convs[0]                    0.88
+  gen.noise_res[0]                     34.46
+  gen.ups[0]                            2.86
+  gen.resblocks[0]                     20.34
+  gen.resblocks[1]                     36.17
+  gen.resblocks[2]                     38.42
+  gen.noise_convs[1]                    0.84
+  gen.noise_res[1]                     75.32
+  gen.ups[1]                            3.92
+  gen.resblocks[3]                     34.70
+  gen.resblocks[4]                     45.38
+  gen.resblocks[5]                     57.10
+  gen.conv_post                         1.98
+  gen.stft.inverse                      1.80
+  dec.generator                       459.77
+  decoder                             482.53
+  TOTAL(with hooks)                   543.77
+
+== modules real_medium117 (ms, median)
+  bert.embeddings                       0.31
+  bert.encoder                         94.50
+  bert.pooler                           0.06
+  bert                                 95.64
+  bert_encoder                          0.25
+  pred.text_encoder(DurEnc)            28.02
+  pred.lstm                             7.04
+  pred.duration_proj                    0.06
+  pred.shared_lstm                     15.03
+  pred.F0[0]                            6.09
+  pred.F0[1]                            9.41
+  pred.F0[2]                            4.06
+  pred.F0_proj                          0.03
+  pred.N[0]                             4.91
+  pred.N[1]                             7.10
+  pred.N[2]                             4.04
+  pred.N_proj                           0.03
+  text_encoder.cnn[0]                   2.39
+  text_encoder.cnn[1]                   2.08
+  text_encoder.cnn[2]                   1.50
+  text_encoder.lstm                     7.52
+  text_encoder                         16.70
+  dec.encode                            9.62
+  dec.asr_res                           0.18
+  dec.decode[0]                        11.12
+  dec.decode[1]                        12.39
+  dec.decode[2]                        11.56
+  dec.decode[3]                        19.54
+  gen.m_source                         47.18
+  gen.stft.transform                    6.46
+  gen.noise_convs[0]                    3.41
+  gen.noise_res[0]                     91.39
+  gen.ups[0]                            8.34
+  gen.resblocks[0]                     71.96
+  gen.resblocks[1]                     96.26
+  gen.resblocks[2]                    114.17
+  gen.noise_convs[1]                    3.44
+  gen.noise_res[1]                    253.14
+  gen.ups[1]                           15.60
+  gen.resblocks[3]                    160.33
+  gen.resblocks[4]                    173.52
+  gen.resblocks[5]                    223.44
+  gen.conv_post                         7.88
+  gen.stft.inverse                      6.67
+  dec.generator                      1443.09
+  decoder                            1512.00
+  TOTAL(with hooks)                  1680.02
+
+== modules real_long394 (ms, median)
+  bert.embeddings                       1.45
+  bert.encoder                        266.98
+  bert.pooler                           0.07
+  bert                                267.77
+  bert_encoder                          0.52
+  pred.text_encoder(DurEnc)           175.34
+  pred.lstm                            34.64
+  pred.duration_proj                    0.17
+  pred.shared_lstm                     80.35
+  pred.F0[0]                           12.92
+  pred.F0[1]                           14.77
+  pred.F0[2]                            5.21
+  pred.F0_proj                          0.09
+  pred.N[0]                             7.31
+  pred.N[1]                            15.64
+  pred.N[2]                             6.18
+  pred.N_proj                           0.09
+  text_encoder.cnn[0]                   3.67
+  text_encoder.cnn[1]                   3.26
+  text_encoder.cnn[2]                   3.48
+  text_encoder.lstm                    22.62
+  text_encoder                         34.88
+  dec.encode                           23.08
+  dec.asr_res                           0.50
+  dec.decode[0]                        35.44
+  dec.decode[1]                        27.68
+  dec.decode[2]                        24.80
+  dec.decode[3]                        56.74
+  gen.m_source                        278.33
+  gen.stft.transform                   17.87
+  gen.noise_convs[0]                    6.50
+  gen.noise_res[0]                    358.27
+  gen.ups[0]                           24.03
+  gen.resblocks[0]                    202.67
+  gen.resblocks[1]                    290.16
+  gen.resblocks[2]                    489.96
+  gen.noise_convs[1]                    9.22
+  gen.noise_res[1]                   1016.47
+  gen.ups[1]                           75.81
+  gen.resblocks[3]                    504.96
+  gen.resblocks[4]                    764.39
+  gen.resblocks[5]                    811.78
+  gen.conv_post                        25.21
+  gen.stft.inverse                     22.84
+  dec.generator                      4515.89
+  decoder                            4596.42
+  TOTAL(with hooks)                  5215.12
+
+== ops rand128: total self 1067.0 ms, 146112 op calls
+  aten::_slow_conv2d_forward                        72    313.14  29.3%
+  aten::slow_conv_dilated2d                         16    207.81  19.5%
+  aten::native_batch_norm                           70    101.96   9.6%
+  aten::sin                                         50     67.11   6.3%
+  aten::addmm                                     2125     55.23   5.2%
+  aten::copy_                                     5497     55.20   5.2%
+  aten::mul                                       6183     43.63   4.1%
+  aten::add                                        285     38.62   3.6%
+  aten::normal_                                      2     36.65   3.4%
+  aten::slow_conv_transpose2d                     2116     29.29   2.7%
+  aten::pow                                         61     10.99   1.0%
+  aten::_weight_norm_interface                      89     10.50   1.0%
+  aten::tanh                                      1982      7.70   0.7%
+  aten::lstm                                         6      7.60   0.7%
+  aten::add_                                      6061      6.72   0.6%
+  aten::as_strided                               33787      5.92   0.6%
+  aten::slice                                    15489      5.05   0.5%
+  aten::narrow                                   15462      4.92   0.5%
+  aten::sigmoid_                                  5904      4.67   0.4%
+  aten::select                                   13517      4.57   0.4%
+  aten::tanh_                                     1968      3.51   0.3%
+  aten::_convolution                                93      3.09   0.3%
+  aten::fill_                                     3097      2.94   0.3%
+  aten::_scaled_dot_product_flash_attention_for_cpu     12      2.66   0.2%
+  aten::unsafe_split                              1968      2.60   0.2%
+  aten::cat                                         55      2.34   0.2%
+  aten::reflection_pad1d                             2      2.20   0.2%
+  aten::leaky_relu                                  28      1.94   0.2%
+  aten::mm                                           5      1.68   0.2%
+  aten::_fft_c2r                                     1      1.67   0.2%
+
+== ops rand510: total self 3283.3 ms, 343783 op calls
+  aten::_slow_conv2d_forward                        72   1113.65  33.9%
+  aten::slow_conv_dilated2d                         16    726.88  22.1%
+  aten::native_batch_norm                           70    262.98   8.0%
+  aten::sin                                         50    200.40   6.1%
+  aten::addmm                                     7531    142.82   4.3%
+  aten::mul                                      22401    140.55   4.3%
+  aten::normal_                                      2    121.51   3.7%
+  aten::add                                        285    111.57   3.4%
+  aten::slow_conv_transpose2d                     2116     80.93   2.5%
+  aten::copy_                                    10903     73.18   2.2%
+  aten::pow                                         61     31.24   1.0%
+  aten::tanh                                      7388     26.34   0.8%
+  aten::lstm                                         6     25.92   0.8%
+  aten::_scaled_dot_product_flash_attention_for_cpu     12     19.42   0.6%
+  aten::add_                                     16873     17.26   0.5%
+  aten::sigmoid_                                 22122     16.64   0.5%
+  aten::fill_                                     3097     12.81   0.4%
+  aten::slice                                    40168     12.70   0.4%
+  aten::tanh_                                     7374     12.63   0.4%
+  aten::narrow                                   40142     12.13   0.4%
+  aten::as_strided                               71628     11.41   0.3%
+  aten::_weight_norm_interface                      89     10.06   0.3%
+  aten::unsafe_split                              7374      8.70   0.3%
+  aten::reflection_pad1d                             2      7.22   0.2%
+  aten::_fft_c2r                                     1      6.16   0.2%
+  aten::cat                                         55      5.89   0.2%
+  aten::div                                         18      4.65   0.1%
+  aten::select                                   15867      4.60   0.1%
+  aten::linear                                    7536      4.51   0.1%
+  aten::_fft_r2c                                     1      3.91   0.1%
+
+== ops real_long394: total self 2867.1 ms, 287272 op calls
+  aten::_slow_conv2d_forward                        72    939.51  32.8%
+  aten::slow_conv_dilated2d                         16    638.31  22.3%
+  aten::native_batch_norm                           70    242.02   8.4%
+  aten::sin                                         50    189.62   6.6%
+  aten::addmm                                     5987    127.24   4.4%
+  aten::mul                                      17769    123.99   4.3%
+  aten::normal_                                      2    101.15   3.5%
+  aten::add                                        285     99.07   3.5%
+  aten::copy_                                     9359     83.37   2.9%
+  aten::slow_conv_transpose2d                     2116     67.80   2.4%
+  aten::pow                                         61     27.43   1.0%
+  aten::tanh                                      5844     22.03   0.8%
+  aten::lstm                                         6     21.63   0.8%
+  aten::add_                                     13785     15.12   0.5%
+  aten::sigmoid_                                 17490     13.79   0.5%
+  aten::_scaled_dot_product_flash_attention_for_cpu     12     11.68   0.4%
+  aten::slice                                    33065     10.85   0.4%
+  aten::tanh_                                     5830     10.51   0.4%
+  aten::as_strided                               60821     10.28   0.4%
+  aten::narrow                                   33038     10.21   0.4%
+  aten::_weight_norm_interface                      89      9.93   0.3%
+  aten::unsafe_split                              5830      7.26   0.3%
+  aten::reflection_pad1d                             2      6.55   0.2%
+  aten::cat                                         55      4.88   0.2%
+  aten::_fft_c2r                                     1      4.87   0.2%
+  aten::select                                   15251      4.73   0.2%
+  aten::fill_                                     3097      4.57   0.2%
+  aten::linear                                    5992      3.76   0.1%
+  aten::_fft_r2c                                     1      3.53   0.1%
+  aten::_convolution                                93      3.28   0.1%

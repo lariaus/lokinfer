@@ -1,0 +1,23 @@
+// RUN: lokinfer-opt --pass=bufferize,plan-memory %s | filecheck %s
+
+// Dynamic sizes: one mem.plan per pool; the gpu_only one says so (the runtime keeps one shared arena per pool).
+// CHECK-LABEL: exec(
+// CHECK-NEXT: %arena = mem.plan sizes[4*N, 4*N] live[2, 14, 7, 15] align 256 -> M0_size, M0_o0, M0_o1 {elem = [4, 4]} : buffer<u8[M0_size]>
+// CHECK-NEXT: %arena_1 = mem.plan sizes[4*N, 4*N] live[0, 4, 5, 9] align 256 -> M1_size, M1_o0, M1_o1 {elem = [4, 4], gpu_only = true} : buffer<u8[M1_size]>
+// CHECK-NEXT: %a = view %arena_1[M1_o0] : buffer<f32[N]>
+// CHECK:      %b = view %arena[M0_o0] : buffer<f32[N]>
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[N]>) {
+    %a = kernel "relu_f32_gpu"(%x) : tensor<f32[N]>
+    %b = kernel "relu_f32_gpu"(%a) : tensor<f32[N]>
+    %c = kernel "relu_f32_gpu"(%b) : tensor<f32[N]>
+    %e = kernel "relu_f32_gpu"(%c) : tensor<f32[N]>
+    %s = sync gpu_to_cpu %b : tensor<f32[N]>
+    %t = sync gpu_to_cpu %e : tensor<f32[N]>
+    %o = kernel "add_f32_cpu"(%s, %t) : tensor<f32[N]>
+    return %o
+  }
+}

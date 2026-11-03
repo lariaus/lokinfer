@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Larger per-app memory limit: long Kokoro inputs on the GPU (rand510) need a ~GB activation arena. Accepted by
+       the free Personal Team (verified 2026-11-01 by the iPhone baselines app, same bundle id). -->
+  <key>com.apple.developer.kernel.increased-memory-limit</key><true/>
+</dict>
+</plist>

@@ -1,0 +1,24 @@
+// RUN: lokinfer-opt --pass=bufferize %s | filecheck %s
+
+// Intermediates are freed right after their last use; the output isn't.
+// CHECK-LABEL: exec(
+// CHECK-NEXT:    %a = buffer.alloc : buffer<f32[N]>
+// CHECK-NEXT:    kernel "add_f32_cpu"(%x, %x) outs(%a)
+// CHECK-NEXT:    %b = buffer.alloc : buffer<f32[N]>
+// CHECK-NEXT:    kernel "mul_f32_cpu"(%a, %x) outs(%b)
+// CHECK-NEXT:    buffer.free %a
+// CHECK-NEXT:    %c = buffer.alloc {output = true} : buffer<f32[N]>
+// CHECK-NEXT:    kernel "relu_f32_cpu"(%b) outs(%c)
+// CHECK-NEXT:    buffer.free %b
+// CHECK-NEXT:    return %c
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[N]>) {
+    %a = kernel "add_f32_cpu"(%x, %x) : tensor<f32[N]>
+    %b = kernel "mul_f32_cpu"(%a, %x) : tensor<f32[N]>
+    %c = kernel "relu_f32_cpu"(%b) : tensor<f32[N]>
+    return %c
+  }
+}

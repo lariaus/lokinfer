@@ -1,0 +1,4 @@
+#!/bin/sh
+# kbench: kernel benchmark harness, see docs/benchmarking.md. Runs with the repo's .venv from any directory.
+ROOT=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+exec "$ROOT/.venv/bin/python" "$ROOT/bench/harness/kbench.py" "$@"

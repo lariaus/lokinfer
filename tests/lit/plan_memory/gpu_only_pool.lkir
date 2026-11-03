@@ -1,0 +1,28 @@
+// RUN: lokinfer-opt --pass=bufferize,plan-memory %s | filecheck %s
+
+// gpu_only buffers (bufferize) get their own arena, never sharing bytes with buffers a CPU op touches: a CPU kernel
+// must not be handed bytes a pending GPU dispatch may still read. Within the gpu_only arena, %a and %c reuse offset 0.
+// CHECK-LABEL: exec(
+// CHECK-NEXT: %arena = buffer.alloc {arena = true} : buffer<u8[512]>
+// CHECK-NEXT: %arena_1 = buffer.alloc {arena = true} : buffer<u8[256]>
+// CHECK-NEXT: %a = view %arena_1[0] : buffer<f32[4]>
+// CHECK:      %b = view %arena[0] : buffer<f32[4]>
+// CHECK:      %c = view %arena_1[0] : buffer<f32[4]>
+// CHECK:      %e = view %arena[64] : buffer<f32[4]>
+// CHECK-NOT:  buffer.free
+
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[4]>) {
+    %a = kernel "relu_f32_gpu"(%x) : tensor<f32[4]>
+    %b = kernel "relu_f32_gpu"(%a) : tensor<f32[4]>
+    %c = kernel "relu_f32_gpu"(%b) : tensor<f32[4]>
+    %e = kernel "relu_f32_gpu"(%c) : tensor<f32[4]>
+    %s = sync gpu_to_cpu %b : tensor<f32[4]>
+    %t = sync gpu_to_cpu %e : tensor<f32[4]>
+    %o = kernel "add_f32_cpu"(%s, %t) : tensor<f32[4]>
+    return %o
+  }
+}

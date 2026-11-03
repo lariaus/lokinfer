@@ -1,0 +1,28 @@
+// RUN: lokinfer-opt --pipeline %s | filecheck %s
+
+// Explicit boundaries: a CPU-made value crosses to the GPU with sync
+// cpu_to_gpu, GPU results come back with sync gpu_to_cpu before a CPU kernel
+// and before dim.read. Syncs are aliases (no copies, unified memory).
+// CHECK-LABEL: exec(
+// CHECK:         kernel "topk_f32_cpu"
+// CHECK:         %bg = sync cpu_to_gpu %b{{(_1)?}} : buffer<f32[8, 8]>
+// CHECK:         kernel "scale_f32_gpu"(%bg)
+// CHECK:         %nc = sync gpu_to_cpu %n{{(_1)?}} : buffer<i64[1]>
+// CHECK-NEXT:    dim.read %nc[0] -> K
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[8, 8]>) {
+    %a = kernel "gemm_f32_gpu"(%x, %x) : tensor<f32[8, 8]>
+    %ac = sync gpu_to_cpu %a : tensor<f32[8, 8]>
+    %b = kernel "topk_f32_cpu"(%ac) : tensor<f32[8, 8]>
+    %bg = sync cpu_to_gpu %b : tensor<f32[8, 8]>
+    %c = kernel "scale_f32_gpu"(%bg) : tensor<f32[8, 8]>
+    %n = kernel "count_i64_gpu"(%c) : tensor<i64[1]>
+    %nc = sync gpu_to_cpu %n : tensor<i64[1]>
+    dim.read %nc[0] -> K
+    %o = kernel "relu_f32_gpu"(%c) : tensor<f32[8, 8]>
+    return %o
+  }
+}

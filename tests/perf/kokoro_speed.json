@@ -1,0 +1,8 @@
+{
+  "_doc": "Kokoro-82M speed-regression baselines (median ms, real117, docs/perf-dashboard.md timing protocol). A run fails if slower than baseline x margin. Margins from measured run-to-run noise (2026-11-01, M2 Max: CPU 0.7 %, GPU 5.4 % between repeated medians) plus room for background load. Update a baseline after an intended speedup.",
+  "margin": {"cpu": 1.15, "gpu": 1.2},
+  "devices": {
+    "Mac14,5": {"cpu": 318.0, "gpu": 127.0, "name": "MacBook Pro M2 Max"},
+    "iPhone19,3": {"cpu": 397.0, "gpu": 244.0, "name": "iPhone 18 Pro Max (remote executor; thermal nominal at start)"}
+  }
+}

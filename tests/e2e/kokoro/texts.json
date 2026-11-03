@@ -1,0 +1,1604 @@
+{
+ "classes": {
+  "word": "one word (< 1.5 s)",
+  "phrase": "short phrase (1-3 s)",
+  "sentence": "sentence (2-5 s)",
+  "long_sentence": "long sentence (5-10 s)",
+  "paragraph": "paragraph (20-40 s, usually one chunk)",
+  "long_paragraph": "long paragraph (40-80 s, several chunks)",
+  "edge": "edge case (numbers, abbreviations, punctuation, ...)"
+ },
+ "voices": {
+  "app": [
+   "af_heart",
+   "am_echo"
+  ],
+  "other": [
+   "af_bella",
+   "af_nicole",
+   "af_sarah",
+   "am_michael",
+   "am_fenrir",
+   "bf_emma",
+   "bm_george",
+   "bf_isabella"
+  ]
+ },
+ "texts": [
+  {
+   "id": "t000",
+   "cls": "word",
+   "voice": "bm_george",
+   "source": "app:phonemes/word-lists",
+   "text": "clerk"
+  },
+  {
+   "id": "t001",
+   "cls": "word",
+   "voice": "am_michael",
+   "source": "app:phonemes/word-lists",
+   "text": "employee"
+  },
+  {
+   "id": "t002",
+   "cls": "word",
+   "voice": "af_nicole",
+   "source": "app:phonemes/word-lists",
+   "text": "faster"
+  },
+  {
+   "id": "t003",
+   "cls": "word",
+   "voice": "bf_isabella",
+   "source": "app:phonemes/word-lists",
+   "text": "fathom"
+  },
+  {
+   "id": "t004",
+   "cls": "word",
+   "voice": "am_echo",
+   "source": "app:phonemes/word-lists",
+   "text": "godmother"
+  },
+  {
+   "id": "t005",
+   "cls": "word",
+   "voice": "af_heart",
+   "source": "app:phonemes/word-lists",
+   "text": "dozen"
+  },
+  {
+   "id": "t006",
+   "cls": "word",
+   "voice": "af_sarah",
+   "source": "app:phonemes/word-lists",
+   "text": "breakdown"
+  },
+  {
+   "id": "t007",
+   "cls": "word",
+   "voice": "am_echo",
+   "source": "app:phonemes/word-lists",
+   "text": "laugh"
+  },
+  {
+   "id": "t008",
+   "cls": "word",
+   "voice": "am_echo",
+   "source": "app:phonemes/word-lists",
+   "text": "yourself"
+  },
+  {
+   "id": "t009",
+   "cls": "word",
+   "voice": "af_heart",
+   "source": "app:phonemes/word-lists",
+   "text": "current"
+  },
+  {
+   "id": "t010",
+   "cls": "word",
+   "voice": "af_heart",
+   "source": "app:phonemes/word-lists",
+   "text": "forward"
+  },
+  {
+   "id": "t011",
+   "cls": "word",
+   "voice": "af_heart",
+   "source": "app:phonemes/word-lists",
+   "text": "toy"
+  },
+  {
+   "id": "t012",
+   "cls": "word",
+   "voice": "af_heart",
+   "source": "app:phonemes/word-lists",
+   "text": "genius"
+  },
+  {
+   "id": "t013",
+   "cls": "word",
+   "voice": "am_echo",
+   "source": "app:phonemes/word-lists",
+   "text": "pathetic"
+  },
+  {
+   "id": "t014",
+   "cls": "word",
+   "voice": "af_heart",
+   "source": "app:phonemes/word-lists",
+   "text": "worse"
+  },
+  {
+   "id": "t015",
+   "cls": "word",
+   "voice": "af_bella",
+   "source": "app:phonemes/word-lists",
+   "text": "foundation"
+  },
+  {
+   "id": "t016",
+   "cls": "word",
+   "voice": "am_fenrir",
+   "source": "app:phonemes/word-lists",
+   "text": "operation"
+  },
+  {
+   "id": "t017",
+   "cls": "word",
+   "voice": "am_echo",
+   "source": "app:phonemes/word-lists",
+   "text": "pants"
+  },
+  {
+   "id": "t018",
+   "cls": "word",
+   "voice": "af_heart",
+   "source": "app:phonemes/word-lists",
+   "text": "treasurer"
+  },
+  {
+   "id": "t019",
+   "cls": "word",
+   "voice": "am_echo",
+   "source": "app:phonemes/word-lists",
+   "text": "positive"
+  },
+  {
+   "id": "t020",
+   "cls": "word",
+   "voice": "am_echo",
+   "source": "app:phonemes/word-lists",
+   "text": "training"
+  },
+  {
+   "id": "t021",
+   "cls": "word",
+   "voice": "af_bella",
+   "source": "app:phonemes/word-lists",
+   "text": "gym"
+  },
+  {
+   "id": "t022",
+   "cls": "phrase",
+   "voice": "af_nicole",
+   "source": "written",
+   "text": "Good morning!"
+  },
+  {
+   "id": "t023",
+   "cls": "phrase",
+   "voice": "bf_isabella",
+   "source": "written",
+   "text": "Thank you so much."
+  },
+  {
+   "id": "t024",
+   "cls": "phrase",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "See you later."
+  },
+  {
+   "id": "t025",
+   "cls": "phrase",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Not right now."
+  },
+  {
+   "id": "t026",
+   "cls": "phrase",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Excuse me, sir?"
+  },
+  {
+   "id": "t027",
+   "cls": "phrase",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "How are you doing?"
+  },
+  {
+   "id": "t028",
+   "cls": "phrase",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "That sounds great."
+  },
+  {
+   "id": "t029",
+   "cls": "phrase",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "Let me think about it."
+  },
+  {
+   "id": "t030",
+   "cls": "phrase",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "Over there, on the left."
+  },
+  {
+   "id": "t031",
+   "cls": "phrase",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Wait, really?"
+  },
+  {
+   "id": "t032",
+   "cls": "phrase",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "No worries at all."
+  },
+  {
+   "id": "t033",
+   "cls": "phrase",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "Happy birthday!"
+  },
+  {
+   "id": "t034",
+   "cls": "phrase",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "What time is it?"
+  },
+  {
+   "id": "t035",
+   "cls": "phrase",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "I'm on my way."
+  },
+  {
+   "id": "t036",
+   "cls": "phrase",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "Could you repeat that?"
+  },
+  {
+   "id": "t037",
+   "cls": "phrase",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "Absolutely not."
+  },
+  {
+   "id": "t038",
+   "cls": "phrase",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "Right, okay then."
+  },
+  {
+   "id": "t039",
+   "cls": "phrase",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "Nice to meet you."
+  },
+  {
+   "id": "t040",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:tts-th-sounds pack",
+   "text": "Athletes sip ginger tea from thermoses and thermal bottles."
+  },
+  {
+   "id": "t041",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:tts-th-sounds pack",
+   "text": "Feather-light pillows at the thrift store cost almost nothing."
+  },
+  {
+   "id": "t042",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:tts-th-sounds pack",
+   "text": "Anything can happen on a thrift-shop treasure hunt, thankfully."
+  },
+  {
+   "id": "t043",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:tts-th-sounds pack",
+   "text": "Sixth grade theater students practiced breathing before their first scene."
+  },
+  {
+   "id": "t044",
+   "cls": "sentence",
+   "voice": "af_bella",
+   "source": "app:tts-th-sounds pack",
+   "text": "Thirsty mouths drank cold lemonade on the south lawn."
+  },
+  {
+   "id": "t045",
+   "cls": "sentence",
+   "voice": "af_sarah",
+   "source": "app:tts-th-sounds pack",
+   "text": "Our earth-friendly bags are made of thick cloth."
+  },
+  {
+   "id": "t046",
+   "cls": "sentence",
+   "voice": "af_sarah",
+   "source": "app:tts-th-sounds pack",
+   "text": "Thousands of people gathered for the anthem on the eighteenth."
+  },
+  {
+   "id": "t047",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:tts-th-sounds pack",
+   "text": "Mouthwash and toothpaste are on sale this month."
+  },
+  {
+   "id": "t048",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:tts-th-sounds pack",
+   "text": "Teeth, toothbrush, and toothpaste go on the bathroom shelf."
+  },
+  {
+   "id": "t049",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:tts-th-sounds pack",
+   "text": "Thin thread holds the feather to the leather strap."
+  },
+  {
+   "id": "t050",
+   "cls": "sentence",
+   "voice": "am_fenrir",
+   "source": "app:tts-th-sounds pack",
+   "text": "Gather your thoughts before the thesis defense starts."
+  },
+  {
+   "id": "t051",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:tts-th-sounds pack",
+   "text": "My thumb drive with the thesis files vanished Thursday."
+  },
+  {
+   "id": "t052",
+   "cls": "sentence",
+   "voice": "bm_george",
+   "source": "app:tts-th-sounds pack",
+   "text": "Thorns scratched my thumb, but nothing serious happened."
+  },
+  {
+   "id": "t053",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:tts-th-sounds pack",
+   "text": "Feathers of the thrush drifted onto the bathhouse roof."
+  },
+  {
+   "id": "t054",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:tts-th-sounds pack",
+   "text": "The athletes stretched their thighs and breathed before the start."
+  },
+  {
+   "id": "t055",
+   "cls": "sentence",
+   "voice": "am_michael",
+   "source": "app:tts-th-sounds pack",
+   "text": "Thoughtful gestures count more than wealth, my grandmother believed."
+  },
+  {
+   "id": "t056",
+   "cls": "sentence",
+   "voice": "bf_isabella",
+   "source": "app:tts-th-sounds pack",
+   "text": "Thoroughly cleaned bathtubs keep the kitchen smelling fresh and healthy."
+  },
+  {
+   "id": "t057",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:tts-th-sounds pack",
+   "text": "Truthfully, the thrift shop coat was worth every single dollar."
+  },
+  {
+   "id": "t058",
+   "cls": "sentence",
+   "voice": "af_sarah",
+   "source": "app:tts-th-sounds pack",
+   "text": "My healthy grandmother still walks the south trail every Thursday."
+  },
+  {
+   "id": "t059",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:tts-th-sounds pack",
+   "text": "Beneath the thatch roof, the earthy kitchen smelled of bread."
+  },
+  {
+   "id": "t060",
+   "cls": "sentence",
+   "voice": "bm_george",
+   "source": "app:tts-th-sounds pack",
+   "text": "Mathematics and faith both demand patience, truth, and thorough thought."
+  },
+  {
+   "id": "t061",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:tts-th-sounds pack",
+   "text": "Lengthy negotiations over the cathedral lease ended on the sixteenth."
+  },
+  {
+   "id": "t062",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:tts-th-sounds pack",
+   "text": "Theme songs still thrill me, thankfully, after all these years."
+  },
+  {
+   "id": "t063",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:tts-th-sounds pack",
+   "text": "Earth-toned clothes look thrilling on the fifth floor."
+  },
+  {
+   "id": "t064",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:tts-th-sounds pack",
+   "text": "Teenagers prefer thick milkshakes over healthy smoothies on Thursdays."
+  },
+  {
+   "id": "t065",
+   "cls": "sentence",
+   "voice": "af_nicole",
+   "source": "app:tts-th-sounds pack",
+   "text": "Worthwhile projects take time, faith, and a thorough plan."
+  },
+  {
+   "id": "t066",
+   "cls": "sentence",
+   "voice": "af_bella",
+   "source": "app:tts-th-sounds pack",
+   "text": "Thumbtacks are worth buying for the bathroom wall."
+  },
+  {
+   "id": "t067",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:tts-th-sounds pack",
+   "text": "Thirst makes the throat feel rough during long, breathless sprints."
+  },
+  {
+   "id": "t068",
+   "cls": "sentence",
+   "voice": "am_fenrir",
+   "source": "app:tts-th-sounds pack",
+   "text": "Birth of the new calf brought the farm together, thankfully."
+  },
+  {
+   "id": "t069",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:tts-th-sounds pack",
+   "text": "The author's thoughtful argument about faith and science was thorough."
+  },
+  {
+   "id": "t070",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:db-shadowing-easy",
+   "text": "My grandma knits warm sweaters."
+  },
+  {
+   "id": "t071",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:db-shadowing-easy",
+   "text": "I boiled water for the pasta."
+  },
+  {
+   "id": "t072",
+   "cls": "sentence",
+   "voice": "bm_george",
+   "source": "app:db-shadowing-easy",
+   "text": "She texts her friends often."
+  },
+  {
+   "id": "t073",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:db-shadowing-easy",
+   "text": "The trail was steep and rocky."
+  },
+  {
+   "id": "t074",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:db-shadowing-easy",
+   "text": "She chooses her clothes carefully."
+  },
+  {
+   "id": "t075",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:db-shadowing-easy",
+   "text": "We play video games together."
+  },
+  {
+   "id": "t076",
+   "cls": "sentence",
+   "voice": "bf_emma",
+   "source": "app:db-shadowing-easy",
+   "text": "The meeting starts at nine."
+  },
+  {
+   "id": "t077",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:db-shadowing-easy",
+   "text": "He checks his blood pressure."
+  },
+  {
+   "id": "t078",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:db-shadowing-easy",
+   "text": "I joined the school club."
+  },
+  {
+   "id": "t079",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:db-shadowing-easy",
+   "text": "I feel healthier this year."
+  },
+  {
+   "id": "t080",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:db-shadowing-medium",
+   "text": "The old market square was full of tourists."
+  },
+  {
+   "id": "t081",
+   "cls": "sentence",
+   "voice": "bm_george",
+   "source": "app:db-shadowing-medium",
+   "text": "She codes small mobile games in her free time."
+  },
+  {
+   "id": "t082",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:db-shadowing-medium",
+   "text": "Our GPS guided us through narrow mountain roads."
+  },
+  {
+   "id": "t083",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:db-shadowing-medium",
+   "text": "My mother saves leftovers for the next day's lunch."
+  },
+  {
+   "id": "t084",
+   "cls": "sentence",
+   "voice": "bf_emma",
+   "source": "app:db-shadowing-medium",
+   "text": "The students created a short video for class."
+  },
+  {
+   "id": "t085",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:db-shadowing-medium",
+   "text": "The software company released a major security update."
+  },
+  {
+   "id": "t086",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:db-shadowing-medium",
+   "text": "I go to bed early on busy school nights."
+  },
+  {
+   "id": "t087",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:db-shadowing-medium",
+   "text": "The gym class played basketball during the whole period."
+  },
+  {
+   "id": "t088",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:db-shadowing-medium",
+   "text": "She joined a coding bootcamp to change careers."
+  },
+  {
+   "id": "t089",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:db-shadowing-medium",
+   "text": "My mother checks her phone during her morning break."
+  },
+  {
+   "id": "t090",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:db-shadowing-medium",
+   "text": "My dad fixes broken furniture around the house sometimes."
+  },
+  {
+   "id": "t091",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:db-shadowing-medium",
+   "text": "We parked our car near the old town square."
+  },
+  {
+   "id": "t092",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:db-shadowing-medium",
+   "text": "I check the weather before choosing my clothes."
+  },
+  {
+   "id": "t093",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:db-shadowing-medium",
+   "text": "The teacher assigned homework for the entire weekend."
+  },
+  {
+   "id": "t094",
+   "cls": "long_sentence",
+   "voice": "bm_george",
+   "source": "app:db-shadowing-hard",
+   "text": "The passengers apologize the generous chair in the restaurant even though my friend replaces the story on Sundays."
+  },
+  {
+   "id": "t095",
+   "cls": "long_sentence",
+   "voice": "af_heart",
+   "source": "app:db-shadowing-hard",
+   "text": "The girl believes an honest report at home after they sell the wonderful sandwich."
+  },
+  {
+   "id": "t096",
+   "cls": "long_sentence",
+   "voice": "am_echo",
+   "source": "app:db-shadowing-hard",
+   "text": "The girl discusses an affordable calendar in the countryside now that the pilot agrees the convenient suitcase in the evening."
+  },
+  {
+   "id": "t097",
+   "cls": "long_sentence",
+   "voice": "am_echo",
+   "source": "app:db-shadowing-hard",
+   "text": "Before the kids promise a terrible screen, my parents write a package after school."
+  },
+  {
+   "id": "t098",
+   "cls": "long_sentence",
+   "voice": "am_echo",
+   "source": "app:db-shadowing-hard",
+   "text": "The children carry the complicated bag at the hospital if his sister carries the complicated cake."
+  },
+  {
+   "id": "t099",
+   "cls": "long_sentence",
+   "voice": "af_heart",
+   "source": "app:db-shadowing-hard",
+   "text": "While they warn an important report in the city, the students lose an impressive laptop."
+  },
+  {
+   "id": "t100",
+   "cls": "long_sentence",
+   "voice": "bm_george",
+   "source": "app:db-shadowing-hard",
+   "text": "So that it finds the wonderful car, the students paint the dog on Sundays."
+  },
+  {
+   "id": "t101",
+   "cls": "long_sentence",
+   "voice": "am_michael",
+   "source": "app:db-shadowing-hard",
+   "text": "The manager jumps a surprising key at the station even though my parents find the friendly map every week."
+  },
+  {
+   "id": "t102",
+   "cls": "long_sentence",
+   "voice": "af_sarah",
+   "source": "app:db-shadowing-hard",
+   "text": "The tourists explain the impressive salad so that we organize the terrible bicycle at noon."
+  },
+  {
+   "id": "t103",
+   "cls": "long_sentence",
+   "voice": "af_heart",
+   "source": "app:db-shadowing-hard",
+   "text": "Before the passengers sell the affordable letter in the mountains, the workers stop a song."
+  },
+  {
+   "id": "t104",
+   "cls": "long_sentence",
+   "voice": "am_echo",
+   "source": "app:db-shadowing-hard",
+   "text": "Before she paints the painting in the park, the man refuses an important newspaper on Sundays."
+  },
+  {
+   "id": "t105",
+   "cls": "long_sentence",
+   "voice": "af_nicole",
+   "source": "app:db-shadowing-hard",
+   "text": "My parents believe the coffee after my friend thanks a surprising orange every morning."
+  },
+  {
+   "id": "t106",
+   "cls": "long_sentence",
+   "voice": "af_heart",
+   "source": "app:db-shadowing-hard",
+   "text": "The artist studies a generous cake unless the man returns the important map this weekend."
+  },
+  {
+   "id": "t107",
+   "cls": "long_sentence",
+   "voice": "af_nicole",
+   "source": "app:db-shadowing-hard",
+   "text": "The pilot delivers the friendly screen whenever the girl closes a clock during the summer."
+  },
+  {
+   "id": "t108",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:phonemes/sentences",
+   "text": "We really need to keep the peace between the feuding neighbors."
+  },
+  {
+   "id": "t109",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:phonemes/sentences",
+   "text": "Three siblings easily agreed to clean the beach house each weekend."
+  },
+  {
+   "id": "t110",
+   "cls": "sentence",
+   "voice": "af_nicole",
+   "source": "app:phonemes/sentences",
+   "text": "The sunset painted the sky with soft shades of orange and silver."
+  },
+  {
+   "id": "t111",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:phonemes/sentences",
+   "text": "A cousin of the family suddenly opened another curtain in the kitchen."
+  },
+  {
+   "id": "t112",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:phonemes/sentences",
+   "text": "The young teacher kept explaining and questioning while thinking about the long upcoming morning exam."
+  },
+  {
+   "id": "t113",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:phonemes/sentences",
+   "text": "She really believes the team can achieve their goals this season."
+  },
+  {
+   "id": "t114",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:phonemes/sentences",
+   "text": "Grandma gave the eager children golden gifts on graduation day."
+  },
+  {
+   "id": "t115",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:phonemes/sentences",
+   "text": "The shallow shore was covered with shiny shells and fresh shellfish."
+  },
+  {
+   "id": "t116",
+   "cls": "sentence",
+   "voice": "bf_isabella",
+   "source": "app:phonemes/sentences",
+   "text": "They gathered their emotions together, breathing slowly before facing the other interview."
+  },
+  {
+   "id": "t117",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:phonemes/sentences",
+   "text": "Just imagine a gentle giant judging a huge orange pie eating contest."
+  },
+  {
+   "id": "t118",
+   "cls": "sentence",
+   "voice": "am_fenrir",
+   "source": "app:phonemes/sentences",
+   "text": "Sally will likely tell everybody about her wonderful little discovery."
+  },
+  {
+   "id": "t119",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:phonemes/sentences",
+   "text": "The stern clerk turned the curtain aside to search for the missing purse early."
+  },
+  {
+   "id": "t120",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:phonemes/sentences",
+   "text": "Kids quickly stacked cans into a tall, crooked pyramid shape."
+  },
+  {
+   "id": "t121",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:phonemes/sentences",
+   "text": "Nine young painters displayed their finest work at the annual gallery opening."
+  },
+  {
+   "id": "t122",
+   "cls": "sentence",
+   "voice": "af_sarah",
+   "source": "app:questions/about-myself",
+   "text": "Tell me about something you decided you were done with."
+  },
+  {
+   "id": "t123",
+   "cls": "sentence",
+   "voice": "af_bella",
+   "source": "app:questions/about-myself",
+   "text": "What's something you keep going back and forth on?"
+  },
+  {
+   "id": "t124",
+   "cls": "sentence",
+   "voice": "am_michael",
+   "source": "app:questions/about-myself",
+   "text": "Tell me about a moment that made you see yourself differently."
+  },
+  {
+   "id": "t125",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:questions/phone-transactions",
+   "text": "There is a resort fee, and one vending machine."
+  },
+  {
+   "id": "t126",
+   "cls": "sentence",
+   "voice": "af_bella",
+   "source": "app:questions/phone-transactions",
+   "text": "Every week the farm box brings fennel you have banned."
+  },
+  {
+   "id": "t127",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:questions/phone-transactions",
+   "text": "An old neighbour has found your number. Catch up properly."
+  },
+  {
+   "id": "t128",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:questions/travel-destinations",
+   "text": "Tell your friend about the people in Zurich."
+  },
+  {
+   "id": "t129",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:questions/travel-destinations",
+   "text": "Tell your friend about the trip you planned to take in United States."
+  },
+  {
+   "id": "t130",
+   "cls": "sentence",
+   "voice": "af_nicole",
+   "source": "app:questions/computer-science",
+   "text": "Explain what an interpreter does differently from a compiler."
+  },
+  {
+   "id": "t131",
+   "cls": "sentence",
+   "voice": "am_michael",
+   "source": "app:questions/computer-science",
+   "text": "Explain why synchronization on multi-GPU devices is more difficult."
+  },
+  {
+   "id": "t132",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:questions/explain-how-it-works",
+   "text": "Explain how a siphon empties containers without pumping."
+  },
+  {
+   "id": "t133",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:questions/explain-how-it-works",
+   "text": "What makes elevation reduce swelling in limbs?"
+  },
+  {
+   "id": "t134",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:questions/pitch-an-idea",
+   "text": "Sell me on trying mozzarella buffalo."
+  },
+  {
+   "id": "t135",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:questions/pitch-an-idea",
+   "text": "Make the case for installing radiant heating."
+  },
+  {
+   "id": "t136",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:questions/describe-with-emotions",
+   "text": "Argue angrily with your cousin about the dent in your garage door."
+  },
+  {
+   "id": "t137",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:questions/describe-with-emotions",
+   "text": "Answer sadly why the church you grew up in was torn down."
+  },
+  {
+   "id": "t138",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "app:questions/roleplay-character",
+   "text": "Answer as a celebrated person being universally honored."
+  },
+  {
+   "id": "t139",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "app:questions/roleplay-character",
+   "text": "Answer as a prophet whose prediction comes true."
+  },
+  {
+   "id": "t140",
+   "cls": "long_sentence",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "and then the rain finally stopped. But the river kept rising all night, so by morning the whole lower road was under water"
+  },
+  {
+   "id": "t141",
+   "cls": "long_sentence",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "So then, they had to pack everything up and start again from the beginning. And somehow nobody complained, which honestly surprised me."
+  },
+  {
+   "id": "t142",
+   "cls": "long_sentence",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "turned out to be the busiest train station in the country, with something like a thousand trains passing through it every single day, can you imagine that"
+  },
+  {
+   "id": "t143",
+   "cls": "long_sentence",
+   "voice": "bf_emma",
+   "source": "written",
+   "text": "thing with the little boy and the kite and the old oak tree, and his father climbing up a ladder to get it back before dinner."
+  },
+  {
+   "id": "t144",
+   "cls": "long_sentence",
+   "voice": "am_michael",
+   "source": "written",
+   "text": "take the story of the lighthouse keeper, for example. He lived alone on that rock for thirty years and wrote a letter to his sister every week."
+  },
+  {
+   "id": "t145",
+   "cls": "long_sentence",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "like, it changes everything you thought about the place, because the old bridge was actually built in a single summer by just a few people."
+  },
+  {
+   "id": "t146",
+   "cls": "long_sentence",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "and giving out medals to all of them. A ninety-year-old runner crossing the finish line, basically the whole town was cheering."
+  },
+  {
+   "id": "t147",
+   "cls": "long_sentence",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "keeping the entire kitchen running. So, as a result, all the bread and the soup had to be ready before the doors opened at noon."
+  },
+  {
+   "id": "t148",
+   "cls": "long_sentence",
+   "voice": "bf_emma",
+   "source": "written",
+   "text": "When I finally arrived at the airport, I realized that I had left my passport on the kitchen table at home."
+  },
+  {
+   "id": "t149",
+   "cls": "long_sentence",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "The weather forecast said it would be sunny all weekend, but it has been raining since Friday afternoon."
+  },
+  {
+   "id": "t150",
+   "cls": "long_sentence",
+   "voice": "bf_emma",
+   "source": "written",
+   "text": "If you want to improve your pronunciation, you should listen carefully and repeat each sentence out loud."
+  },
+  {
+   "id": "t151",
+   "cls": "long_sentence",
+   "voice": "am_fenrir",
+   "source": "written",
+   "text": "My neighbor, who works as a nurse at the hospital, usually comes home very late on Thursday nights."
+  },
+  {
+   "id": "t152",
+   "cls": "long_sentence",
+   "voice": "bm_george",
+   "source": "written",
+   "text": "Although the restaurant was quite expensive, the food was absolutely delicious and the service was excellent."
+  },
+  {
+   "id": "t153",
+   "cls": "long_sentence",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "She told me that she would call me back as soon as she found out what had happened to the package."
+  },
+  {
+   "id": "t154",
+   "cls": "long_sentence",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "We spent the whole afternoon walking around the old town, taking photos of the narrow streets and colorful houses."
+  },
+  {
+   "id": "t155",
+   "cls": "long_sentence",
+   "voice": "af_sarah",
+   "source": "written",
+   "text": "The new manager explained the project in detail, but most of the team still had a lot of questions afterwards."
+  },
+  {
+   "id": "t156",
+   "cls": "long_sentence",
+   "voice": "af_bella",
+   "source": "written",
+   "text": "Before you leave the office tonight, please make sure that all the windows are closed and the lights are off."
+  },
+  {
+   "id": "t157",
+   "cls": "long_sentence",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "I have been learning to play the guitar for almost three years, and I still can't play my favorite song properly."
+  },
+  {
+   "id": "t158",
+   "cls": "long_sentence",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Thousands of people gathered in the square to watch the fireworks and celebrate the beginning of the new year."
+  },
+  {
+   "id": "t159",
+   "cls": "long_sentence",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "He said he would rather stay at home and read a good book than go out to a noisy party with strangers."
+  },
+  {
+   "id": "t160",
+   "cls": "long_sentence",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Honestly, the hardest part of moving to a new country wasn't the language, it was making real friends."
+  },
+  {
+   "id": "t161",
+   "cls": "long_sentence",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Through the thick fog, the three thieves thought they saw something strange on the other side of the bridge."
+  },
+  {
+   "id": "t162",
+   "cls": "sentence",
+   "voice": "bf_isabella",
+   "source": "written",
+   "text": "What does a good night's sleep do for your memory?"
+  },
+  {
+   "id": "t163",
+   "cls": "sentence",
+   "voice": "am_fenrir",
+   "source": "written",
+   "text": "Your garden produced twice as many tomatoes this year. How?"
+  },
+  {
+   "id": "t164",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "What changes when a small town suddenly becomes a tourist destination?"
+  },
+  {
+   "id": "t165",
+   "cls": "sentence",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "How would you organize a kitchen so that cooking feels effortless?"
+  },
+  {
+   "id": "t166",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Last year you moved to a new city. How did that change your routine?"
+  },
+  {
+   "id": "t167",
+   "cls": "sentence",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Why measure a city's traffic in travel time rather than in cars?"
+  },
+  {
+   "id": "t168",
+   "cls": "long_paragraph",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "They're layers, from the ground up.\n\nThe soil is the foundation: the minerals from broken rock, the water held between the grains, and the countless tiny organisms that turn fallen leaves into food for plants. Without healthy soil, nothing else in the garden works, no matter how much you water or how carefully you choose the seeds. That's why experienced gardeners spend more time on the ground than on the plants.\n\nAbove that come the roots, which most people never think about. They anchor the plant, store energy for the winter, and trade sugar with fungi in exchange for water and nutrients from far away.\n\nThen there are the stems and leaves, the part we actually see. Leaves capture sunlight and turn it into sugar, while the stems carry water up and food down, like a slow two-way road. A tall tree moves hundreds of liters of water every day this way, silently.\n\nFinally, flowers and fruit sit on top. They exist mostly to attract insects and animals that carry pollen and seeds somewhere new. Each layer depends on the one below it, which is why a gardener who fixes the soil first usually fixes everything else too."
+  },
+  {
+   "id": "t169",
+   "cls": "long_paragraph",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "The usual advice, and what I'd recommend: plan the week on Sunday evening, write down the three things that really matter, and protect the time for them before anything else gets scheduled. Most people do the opposite. They fill their calendar with meetings and errands, and then try to squeeze the important work into whatever gaps are left, which almost never works for very long.\n\nThe second piece is to batch the small tasks. Answering messages, paying bills and making phone calls all feel quick, but switching between them costs a lot of attention. Doing them together, once or twice a day, keeps the rest of the day free for deeper work that needs a clear head.\n\nThird, leave some empty space. A schedule with no slack breaks the moment anything unexpected happens, and something unexpected always happens. A free hour in the afternoon is not wasted time; it's insurance.\n\nAnd finally, review on Friday. Ten minutes is enough to see what worked, what didn't, and what to move to next week without feeling guilty. Over a few months, those short reviews show you patterns: which days are always overloaded, which tasks you keep postponing, and which habits really make a difference."
+  },
+  {
+   "id": "t170",
+   "cls": "long_paragraph",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Because bread is mostly air, not flour. To get a light loaf, you need two things working together: gas produced by the yeast, and a dough strong enough to trap it.\n\nThe yeast eats the sugars in the flour and releases carbon dioxide. At the same time, kneading lines up the proteins in the flour into long, stretchy strands called gluten. These strands form a kind of net, and as the gas is produced, the net stretches into thousands of small bubbles. If the dough is too weak, the bubbles burst and the loaf comes out flat and heavy.\n\nTime matters as much as technique. A slow rise in a cool kitchen gives the yeast and bacteria longer to develop flavor, which is why many bakers leave their dough overnight.\n\nThen comes the oven. The heat makes the gas expand one last time, the water turns to steam, and the outside dries into a crust. That final burst is what bakers call oven spring, and it's the moment everyone waits for. A few minutes later, the kitchen smells like a bakery, and the hardest part is waiting for the loaf to cool down."
+  },
+  {
+   "id": "t171",
+   "cls": "long_paragraph",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "The first thing to understand is that a river is never really the same from one day to the next. The water you see this morning will be in the sea within a week, replaced by rain that fell on distant hills.\n\nRivers also shape the land around them. On the outside of every bend the current is faster, so it eats into the bank, while on the inside it slows down and leaves sand behind.\n\nOver hundreds of years, this slowly pushes the bends further and further outward, until one day a flood cuts straight across the narrow neck of land between two loops. The old loop is left behind as a curved lake, sometimes called an oxbow lake, and the river simply carries on along its new, shorter path. If you look at an aerial photo of a wide valley, you can often spot several of these old loops at once.\n\nThat's why maps of rivers go out of date, and why towns built on their banks keep moving their bridges. A river may look calm and permanent, but on the scale of centuries it behaves more like a slowly swinging rope."
+  },
+  {
+   "id": "t172",
+   "cls": "long_paragraph",
+   "voice": "af_nicole",
+   "source": "written",
+   "text": "The short answer is that it saves an enormous amount of energy over a whole year. A well-insulated house keeps the heat inside during winter and outside during summer, so the heating and cooling systems run much less often, and the bills drop accordingly.\n\nMost heat escapes through a few predictable places: the roof, the windows, the gaps around doors, and the walls. Warm air rises, so an uninsulated attic is usually the biggest leak. Adding a thick layer of insulation there is often the cheapest improvement with the fastest payback, sometimes within two or three winters.\n\nWindows come next. Double glazing traps a layer of air or gas between two panes, which slows the flow of heat considerably. Older single panes can lose ten times more heat than a good modern window, and they also let in street noise.\n\nThen there are the small things: draft stoppers, thick curtains, and sealing the cracks around pipes. Each one seems minor, but together they add up to a much more comfortable home. They are also cheap enough to do in a single weekend, with no special tools and no help from a professional."
+  },
+  {
+   "id": "t173",
+   "cls": "long_paragraph",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "Far more than people expect. Often more than the trip itself.\n\nOn a long journey, the planning is where most of the real decisions happen. You choose the route, the season, the budget and the pace, and each of those choices quietly shapes everything that follows. Traveling in the rainy season might save half the cost of the hotels, for example, but it also means some roads are closed and some islands are simply impossible to reach. A slower pace means fewer places, but much deeper memories of each one.\n\nThen there's the paperwork. Visas, vaccinations, insurance and bookings all take time, and some of them need to be done months in advance. Forgetting one small document can turn a smooth arrival into a long, stressful afternoon at a border office, with no phone signal and nowhere to sit. It happens to experienced travelers far more often than they like to admit.\n\nThat said, the best trips always leave room for surprises. Plan the skeleton carefully, and let the days themselves fill in the rest. Some of the best memories come from the bus you missed or the café you found by accident."
+  },
+  {
+   "id": "t174",
+   "cls": "long_paragraph",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "I go from the big picture down to the smallest detail.\n\nFirst, I read the whole recipe from start to finish before touching anything. That tells me how long it will really take, which steps can happen at the same time, and whether I need to start something the night before. Nothing is worse than discovering, halfway through, that the meat should have been marinating for twelve hours.\n\nSecond, I prepare every ingredient in advance. Vegetables are chopped, spices are measured, and the pans are out on the counter. Professional cooks call this mise en place, and it's the main reason restaurant kitchens can cook so quickly under pressure.\n\nThird, I cook in the order of the slowest dish. Rice and sauces go on first, quick things like fish or greens go on last, so everything is ready together.\n\nFinally, I taste at every stage. Salt, acid and heat are easy to adjust early and almost impossible to fix once the dish is on the plate. And when it goes wrong anyway, I write down what happened, so the next attempt is a little better than the last."
+  },
+  {
+   "id": "t175",
+   "cls": "long_paragraph",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "When the weather doesn't follow the usual pattern, forecasters rely more on computer models than on experience.\n\nThese models divide the atmosphere into millions of small boxes, each a few kilometers wide, and calculate how temperature, pressure, wind and moisture will change in each one over the next few minutes. Then they repeat the calculation again and again, step by step, until they reach several days into the future. That is a staggering amount of arithmetic, and it runs on some of the largest computers in the world.\n\nThe difficulty is that small errors grow quickly. A tiny mistake in the starting temperature over the ocean can become a completely different storm a week later. To deal with this, forecasters run the same model dozens of times with slightly different starting conditions, and look at how much the results disagree.\n\nIf all the runs agree, the forecast is confident. If they spread out in every direction, the honest answer is that nobody really knows yet, and that's exactly what a good forecast should say. That's also why forecasts for tomorrow are usually reliable, while forecasts for ten days ahead are little more than educated guesses."
+  },
+  {
+   "id": "t176",
+   "cls": "long_paragraph",
+   "voice": "am_fenrir",
+   "source": "written",
+   "text": "A public library is much more than a building full of books. It's one of the few places in a modern city where anyone can walk in, stay as long as they like, and never be asked to buy anything. That simple fact makes it valuable to students, retired people, job seekers and families alike.\n\nInside, the collection has changed a lot over the last twenty years. Besides books, most libraries now lend films, music, audiobooks, and sometimes even tools, musical instruments or board games. Many offer free computers and internet access, which matters enormously for people who don't have either at home. Librarians spend a growing part of their day helping visitors fill in online forms, write a resume, or find reliable information.\n\nLibraries also host events: reading groups, language classes, homework clubs and small concerts. Children's story time on Saturday mornings is often the busiest hour of the whole week.\n\nAnd on a cold winter afternoon, they're simply a warm, quiet place to sit and think. For many people living alone, the friendly hello at the front desk is the only conversation they have all day, and that alone makes the library worth protecting."
+  },
+  {
+   "id": "t177",
+   "cls": "long_paragraph",
+   "voice": "af_bella",
+   "source": "written",
+   "text": "Composting works best at home, so where you put the bin decides whether you'll actually keep using it. A spot that is too far from the kitchen means scraps pile up in the sink, and a spot in full sun means the pile dries out and stops breaking down. Ideally, it sits in partial shade, on bare soil, a short walk from the back door.\n\nThe recipe itself is simple. You mix green material, like vegetable peelings, coffee grounds and fresh grass, with brown material, like dry leaves, cardboard and straw. The greens provide nitrogen, the browns provide carbon, and together they feed the bacteria and worms that do the real work. A rough balance of one part green to two parts brown is a good start.\n\nTurning the pile every week or two brings in air and speeds everything up. Without air, the pile starts to smell, which is usually the first sign that something is off.\n\nAfter a few months, the bottom of the bin turns dark and crumbly, and smells like a forest floor. That's finished compost, ready to spread on the garden beds in spring, where it feeds next year's vegetables."
+  },
+  {
+   "id": "t178",
+   "cls": "paragraph",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Every Saturday morning, my grandmother used to wake up before sunrise to bake bread for the whole family. The smell would slowly fill the house, and one by one we would wander into the kitchen, still half asleep, hoping to steal a warm slice before breakfast. She always pretended to be annoyed, but she secretly made an extra loaf just for us."
+  },
+  {
+   "id": "t179",
+   "cls": "paragraph",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "Learning a new language is a little bit like building a house. First you need a solid foundation: the basic grammar and the most common words. Then you add the walls and the roof, which are the expressions and the patterns you hear every day. Finally, you decorate it with the idioms and the jokes that make it feel like home."
+  },
+  {
+   "id": "t180",
+   "cls": "paragraph",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "The meeting started twenty minutes late because the projector wasn't working. Someone suggested we just use a laptop instead, but nobody had the right cable. In the end, we gathered around a single screen, squinting at tiny charts, and somehow we still managed to make a decision about the budget for next year."
+  },
+  {
+   "id": "t181",
+   "cls": "paragraph",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "I've never been a morning person. My alarm goes off at seven, and I usually press snooze at least three times. By the time I actually get out of bed, I have about ten minutes to shower, get dressed and find my keys, which are never where I think I left them."
+  },
+  {
+   "id": "t182",
+   "cls": "paragraph",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Last winter we rented a small cabin in the mountains. There was no internet and barely any phone signal, so we spent the evenings playing board games by the fire and talking for hours. It was the most relaxing week I've had in years, and I can't wait to go back."
+  },
+  {
+   "id": "t183",
+   "cls": "paragraph",
+   "voice": "am_michael",
+   "source": "written",
+   "text": "To make a good cup of tea, start with fresh, cold water and bring it to a boil. Warm the teapot first, then add one spoon of tea for each person, plus one for the pot. Pour the water, wait three to five minutes, and don't forget the milk if you like it the British way."
+  },
+  {
+   "id": "t184",
+   "cls": "paragraph",
+   "voice": "af_bella",
+   "source": "written",
+   "text": "Our team has been working on this product for almost two years. We started with a simple idea: make it easier for people to practice speaking every day. Since then, we've talked to hundreds of learners, rewritten the app twice, and learned that the most important feature is simply getting people to open it."
+  },
+  {
+   "id": "t185",
+   "cls": "paragraph",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "The museum was much bigger than I expected. We spent the first two hours in the ancient history section alone, looking at pottery, coins and statues that were thousands of years old. By the time we reached the modern art wing, our feet hurt so much that we just sat on a bench and watched the other visitors."
+  },
+  {
+   "id": "t186",
+   "cls": "long_paragraph",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Last summer my brother and I decided to drive along the whole coast, from the little fishing village where our grandparents used to live, all the way to the big city in the south. We didn't plan much in advance. Every morning we looked at the map, picked a direction and simply started driving. We stopped whenever something caught our eye: a market selling fresh peaches, an old lighthouse on a cliff, a tiny restaurant with only three tables. In the evenings we looked for cheap hotels near the beach, ate grilled fish, and talked for hours about our childhood, about the people we used to know, and about the plans we had never dared to talk about. By the end of the trip we had taken hundreds of photos, but honestly, the best part was simply spending time together again, without phones ringing or work getting in the way. We have already promised each other to do it again next year, maybe this time in the other direction."
+  },
+  {
+   "id": "t187",
+   "cls": "long_paragraph",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "When people ask me how I learned English, they usually expect me to name a course or an app. The truth is a bit more boring. I watched the same videos again and again, paused after every sentence, and repeated it out loud until it sounded right. At first it felt ridiculous. I was talking to my laptop like a parrot. But after a few weeks I noticed that I could follow conversations much more easily, and that words I had repeated many times started coming out of my mouth without thinking. That's the whole secret: listen, repeat, and do it every day, even when you don't feel like it. Ten minutes a day is better than two hours once a week. And if you record yourself and listen back, you'll hear mistakes you never noticed before, which is uncomfortable, but it's exactly how you improve. Nobody enjoys hearing their own voice at first, but you get used to it."
+  },
+  {
+   "id": "t188",
+   "cls": "long_paragraph",
+   "voice": "af_nicole",
+   "source": "written",
+   "text": "The history of the bicycle is surprisingly complicated. The first machines, in the early nineteenth century, had no pedals at all: riders pushed themselves along with their feet, like children on a balance bike. Later came the famous high wheelers, with an enormous front wheel and a tiny one at the back. They were fast, but falling off one was genuinely dangerous, and only brave young men really used them. The so-called safety bicycle, with two wheels of the same size and a chain driving the rear wheel, changed everything. Suddenly cycling was something almost anyone could do, including women, who found in the bicycle a new kind of freedom. Within a few years, cities were full of cyclists, roads were improved, and some historians even argue that the bicycle helped pave the way, quite literally, for the car."
+  },
+  {
+   "id": "t189",
+   "cls": "long_paragraph",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "Good evening everyone, and thank you for coming tonight. I know many of you travelled a long way to be here, and that means a lot to all of us. When we started this association ten years ago, we were five friends sitting around a kitchen table with a crazy idea and almost no money. Today we have more than two hundred volunteers, three community gardens, and a small library that is open every weekend. None of this would have been possible without you. So before we eat, and before the music starts, I would like to say a special thank you to the people who work in the shadows: the ones who carry the chairs, who answer the emails at midnight, and who always show up when it rains. Please raise your glasses. To the next ten years!"
+  },
+  {
+   "id": "t190",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "It costs $12.99, or about €11.50."
+  },
+  {
+   "id": "t191",
+   "cls": "edge",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Call me at 555-0123 before 5:30 p.m."
+  },
+  {
+   "id": "t192",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "The meeting is on Monday, March 3rd, 2025."
+  },
+  {
+   "id": "t193",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "She was born on 07/04/1990 in New York."
+  },
+  {
+   "id": "t194",
+   "cls": "edge",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "We sold 1,234,567 copies in 2023."
+  },
+  {
+   "id": "t195",
+   "cls": "edge",
+   "voice": "af_sarah",
+   "source": "written",
+   "text": "The temperature dropped to -5°C last night."
+  },
+  {
+   "id": "t196",
+   "cls": "edge",
+   "voice": "bf_isabella",
+   "source": "written",
+   "text": "Dr. Smith and Mr. Jones met at St. Mary's Hospital."
+  },
+  {
+   "id": "t197",
+   "cls": "edge",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "The U.S.A. and the U.K. signed the agreement."
+  },
+  {
+   "id": "t198",
+   "cls": "edge",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "NASA, the FBI and the BBC were all there."
+  },
+  {
+   "id": "t199",
+   "cls": "edge",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "I LOVE THIS SONG SO MUCH!"
+  },
+  {
+   "id": "t200",
+   "cls": "edge",
+   "voice": "bf_emma",
+   "source": "written",
+   "text": "STOP. Don't touch that."
+  },
+  {
+   "id": "t201",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "\"Are you sure?\" she asked. \"Absolutely,\" he said."
+  },
+  {
+   "id": "t202",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "Wait... what? No way!!!"
+  },
+  {
+   "id": "t203",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "Well - I mean - it's complicated; isn't it?"
+  },
+  {
+   "id": "t204",
+   "cls": "edge",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Hmm. Okay. Fine. Whatever."
+  },
+  {
+   "id": "t205",
+   "cls": "edge",
+   "voice": "bf_isabella",
+   "source": "written",
+   "text": "(This part is in parentheses.) And this part isn't."
+  },
+  {
+   "id": "t206",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "Café, naïve, résumé, and jalapeño are borrowed words."
+  },
+  {
+   "id": "t207",
+   "cls": "edge",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "We had crème brûlée in São Paulo."
+  },
+  {
+   "id": "t208",
+   "cls": "edge",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "I'd've done it if I could've."
+  },
+  {
+   "id": "t209",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "The ratio is 3:2, roughly 66.7%."
+  },
+  {
+   "id": "t210",
+   "cls": "edge",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Version 2.0.1 was released on 2024-11-15."
+  },
+  {
+   "id": "t211",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "Chapter IV begins on page 42."
+  },
+  {
+   "id": "t212",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "It's 10 a.m. here, 6 p.m. in Tokyo."
+  },
+  {
+   "id": "t213",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "He scored 3/4 on the test, i.e. 75 percent."
+  },
+  {
+   "id": "t214",
+   "cls": "edge",
+   "voice": "bf_emma",
+   "source": "written",
+   "text": "Email me at hello@example.com, or visit www.example.com."
+  },
+  {
+   "id": "t215",
+   "cls": "edge",
+   "voice": "bf_emma",
+   "source": "written",
+   "text": "First line of the poem.\nSecond line, after a line break.\nAnd the third one."
+  },
+  {
+   "id": "t216",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "#1 tip: practice daily & stay calm."
+  },
+  {
+   "id": "t217",
+   "cls": "edge",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Rock 'n' roll never dies."
+  },
+  {
+   "id": "t218",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "OK"
+  },
+  {
+   "id": "t219",
+   "cls": "edge",
+   "voice": "am_fenrir",
+   "source": "written",
+   "text": "A"
+  },
+  {
+   "id": "t220",
+   "cls": "edge",
+   "voice": "am_michael",
+   "source": "written",
+   "text": "Hello 👋 world 🌍!"
+  },
+  {
+   "id": "t221",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "1, 2, 3, 4, 5, 6, 7, 8, 9, 10."
+  },
+  {
+   "id": "t222",
+   "cls": "edge",
+   "voice": "bf_isabella",
+   "source": "written",
+   "text": "In 1969, Apollo 11 landed on the Moon at 20:17 UTC."
+  },
+  {
+   "id": "t223",
+   "cls": "edge",
+   "voice": "am_echo",
+   "source": "written",
+   "text": "Mississippi."
+  },
+  {
+   "id": "t224",
+   "cls": "edge",
+   "voice": "af_heart",
+   "source": "written",
+   "text": "The quick brown fox jumps over the lazy dog."
+  }
+ ]
+}

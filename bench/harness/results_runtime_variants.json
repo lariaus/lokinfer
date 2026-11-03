@@ -1,0 +1,159 @@
+{
+ "Mac CPU": {
+  "measured_at": "2026-11-02T07:44:59",
+  "variants": {
+   "mono-thread": {
+    "mnist": {
+     "case": "B=64",
+     "median_ms": 0.16058399342000484,
+     "n": 5000
+    },
+    "mobilenet_v2": {
+     "case": "N=1 224x224",
+     "median_ms": 4.008082905784249,
+     "n": 499
+    },
+    "kokoro": {
+     "case": "app59f",
+     "median_ms": 278.7990625947714,
+     "n": 30
+    },
+    "state": {
+     "low_power_mode": false,
+     "power": "AC",
+     "thermal": "nominal"
+    }
+   },
+   "pool, default QoS": {
+    "mnist": {
+     "case": "B=64",
+     "median_ms": 0.1646669115871191,
+     "n": 5000
+    },
+    "mobilenet_v2": {
+     "case": "N=1 224x224",
+     "median_ms": 1.6944999806582928,
+     "n": 1146
+    },
+    "kokoro": {
+     "case": "app59f",
+     "median_ms": 114.15893700905144,
+     "n": 30
+    },
+    "state": {
+     "low_power_mode": false,
+     "power": "AC",
+     "thermal": "nominal"
+    }
+   },
+   "pool, P-core QoS (shipped)": {
+    "mnist": {
+     "case": "B=64",
+     "median_ms": 0.16070902347564697,
+     "n": 5000
+    },
+    "mobilenet_v2": {
+     "case": "N=1 224x224",
+     "median_ms": 1.5873954398557544,
+     "n": 1222
+    },
+    "kokoro": {
+     "case": "app59f",
+     "median_ms": 113.9392500044778,
+     "n": 30
+    },
+    "state": {
+     "low_power_mode": false,
+     "power": "AC",
+     "thermal": "nominal"
+    }
+   }
+  }
+ },
+ "iPhone CPU": {
+  "measured_at": "2026-11-03T12:21:58",
+  "variants": {
+   "mono-thread": {
+    "mnist": {
+     "case": "B=64",
+     "median_ms": 0.119583,
+     "n": 3480,
+     "thermal_end": "nominal"
+    },
+    "mobilenet_v2": {
+     "case": "N=1 224x224",
+     "median_ms": 2.0465625,
+     "n": 986,
+     "thermal_end": "nominal"
+    },
+    "kokoro": {
+     "case": "app59f",
+     "median_ms": 141.429625,
+     "n": 30,
+     "thermal_end": "nominal"
+    },
+    "state": {
+     "thermal": "nominal",
+     "low_power_mode": false,
+     "build": "569d277a7fb8",
+     "runtime_env": "LOKINFER_THREADS=1 VECLIB_MAXIMUM_THREADS=1",
+     "device": "iPhone19,3"
+    }
+   },
+   "pool, default QoS": {
+    "mnist": {
+     "case": "B=64",
+     "median_ms": 0.048125,
+     "n": 4603,
+     "thermal_end": "nominal"
+    },
+    "mobilenet_v2": {
+     "case": "N=1 224x224",
+     "median_ms": 1.650708,
+     "n": 1232,
+     "thermal_end": "nominal"
+    },
+    "kokoro": {
+     "case": "app59f",
+     "median_ms": 101.313146,
+     "n": 30,
+     "thermal_end": "nominal"
+    },
+    "state": {
+     "thermal": "nominal",
+     "low_power_mode": false,
+     "build": "569d277a7fb8",
+     "runtime_env": "LOKINFER_POOL_QOS=default",
+     "device": "iPhone19,3"
+    }
+   },
+   "pool, P-core QoS (shipped)": {
+    "mnist": {
+     "case": "B=64",
+     "median_ms": 0.06875,
+     "n": 3824,
+     "thermal_end": "nominal"
+    },
+    "mobilenet_v2": {
+     "case": "N=1 224x224",
+     "median_ms": 1.610042,
+     "n": 1244,
+     "thermal_end": "nominal"
+    },
+    "kokoro": {
+     "case": "app59f",
+     "median_ms": 103.242583,
+     "n": 30,
+     "thermal_end": "nominal"
+    },
+    "state": {
+     "thermal": "nominal",
+     "low_power_mode": false,
+     "build": "569d277a7fb8",
+     "runtime_env": "",
+     "device": "iPhone19,3"
+    }
+   }
+  }
+ }
+}

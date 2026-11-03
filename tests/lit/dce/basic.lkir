@@ -1,0 +1,25 @@
+// RUN: lokinfer-opt --pass=dce %s | filecheck %s
+// Unused kernels / constants / views go; a kernel whose result feeds the return stays, and so does an `inout`
+// kernel (it writes a persistent buffer) even though nothing reads a result of it.
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[4]>, %pos: tensor<i64[1]>) {
+    %c = const.inline dense<[1.0, 2.0, 3.0, 4.0]> : tensor<f32[4]>
+    %dead = kernel "add_f32_cpu"(%x, %c) : tensor<f32[4]>
+    %deadv = view %dead[0] : tensor<f32[2]>
+    %p = buffer.alloc {device = "cpu", persistent = true} : buffer<f32[8, 1]>
+    kernel "kv_write_f32_cpu"(%p, %p, %x, %pos) {inout = [0, 1]}
+    %y = kernel "mul_f32_cpu"(%x, %x) : tensor<f32[4]>
+    return %y
+  }
+}
+
+// CHECK-NOT: const.inline
+// CHECK-NOT: "add_f32_cpu"
+// CHECK-NOT: view
+// CHECK: buffer.alloc {device = "cpu", persistent = true}
+// CHECK: kernel "kv_write_f32_cpu"
+// CHECK: kernel "mul_f32_cpu"
+// CHECK: return

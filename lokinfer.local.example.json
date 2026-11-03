@@ -1,0 +1,9 @@
+{
+  "iphone_udid": "<the iPhone's UDID: xcrun devicectl list devices>",
+  "ios_team_id": "<your Apple development team id>",
+  "ios_bundle_id": "com.example.lokinfer.testhost",
+  "baselines_dir": "<checkout of the baseline frameworks (benchmark comparisons)>",
+  "english_practice_dir": "<checkout of english-practice (Kokoro reference pipeline, e2e test)>",
+  "mlx_python": "<python with mlx installed, for the MLX baselines>",
+  "work_dir": ".cache/work"
+}

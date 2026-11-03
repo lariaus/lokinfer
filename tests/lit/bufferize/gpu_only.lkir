@@ -1,0 +1,38 @@
+// RUN: lokinfer-opt --pass=bufferize %s | filecheck %s
+
+// A buffer only GPU kernels touch is `gpu_only` and freed right after its last GPU use (GPU-to-GPU reuse is ordered
+// by the queue and the runtime's barriers). A GPU-written buffer that a CPU op also touches is not gpu_only, and its
+// free waits for the next `sync gpu_to_cpu` (the GPU may still be reading it until then).
+// CHECK-LABEL: exec(
+// CHECK:      %a = buffer.alloc {gpu_only = true} : buffer<f32[4]>
+// CHECK-NEXT: kernel "relu_f32_gpu"(%x) outs(%a)
+// CHECK-NEXT: %b = buffer.alloc : buffer<f32[4]>
+// CHECK-NEXT: kernel "relu_f32_gpu"(%a) outs(%b)
+// CHECK-NEXT: buffer.free %a
+// CHECK-NEXT: %c = buffer.alloc {gpu_only = true} : buffer<f32[4]>
+// CHECK-NEXT: kernel "relu_f32_gpu"(%b) outs(%c)
+// CHECK-NEXT: %e = buffer.alloc : buffer<f32[4]>
+// CHECK-NEXT: kernel "relu_f32_gpu"(%c) outs(%e)
+// CHECK-NEXT: buffer.free %c
+// CHECK-NEXT: %s = sync gpu_to_cpu %b : buffer<f32[4]>
+// CHECK-NEXT: %t = sync gpu_to_cpu %e : buffer<f32[4]>
+// CHECK-NEXT: %o = buffer.alloc {output = true} : buffer<f32[4]>
+// CHECK-NEXT: kernel "add_f32_cpu"(%s, %t) outs(%o)
+// CHECK-NEXT: buffer.free %b
+// CHECK-NEXT: buffer.free %e
+// CHECK-NEXT: return %o
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[4]>) {
+    %a = kernel "relu_f32_gpu"(%x) : tensor<f32[4]>
+    %b = kernel "relu_f32_gpu"(%a) : tensor<f32[4]>
+    %c = kernel "relu_f32_gpu"(%b) : tensor<f32[4]>
+    %e = kernel "relu_f32_gpu"(%c) : tensor<f32[4]>
+    %s = sync gpu_to_cpu %b : tensor<f32[4]>
+    %t = sync gpu_to_cpu %e : tensor<f32[4]>
+    %o = kernel "add_f32_cpu"(%s, %t) : tensor<f32[4]>
+    return %o
+  }
+}

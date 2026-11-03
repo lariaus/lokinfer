@@ -1,0 +1,8 @@
+{"dev": "cpu", "case": "rand16", "samples": 44400, "median_ms": 288.0, "min_ms": 279.2, "iqr_ms": 6.7}
+{"dev": "cpu", "case": "rand64", "samples": 102000, "median_ms": 540.1, "min_ms": 532.5, "iqr_ms": 12.0}
+{"dev": "cpu", "case": "rand128", "samples": 200400, "median_ms": 994.7, "min_ms": 982.0, "iqr_ms": 17.4}
+{"dev": "cpu", "case": "rand256", "samples": 408000, "median_ms": 1848.0, "min_ms": 1774.6, "iqr_ms": 83.4}
+{"dev": "cpu", "case": "rand510", "samples": 676200, "median_ms": 3089.9, "min_ms": 3007.6, "iqr_ms": 145.2}
+{"dev": "cpu", "case": "real_short28", "samples": 51600, "median_ms": 314.7, "min_ms": 311.9, "iqr_ms": 5.0}
+{"dev": "cpu", "case": "real_medium117", "samples": 166800, "median_ms": 850.2, "min_ms": 835.9, "iqr_ms": 14.9}
+{"dev": "cpu", "case": "real_long394", "samples": 561000, "median_ms": 2555.7, "min_ms": 2474.9, "iqr_ms": 107.7}

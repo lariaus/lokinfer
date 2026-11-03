@@ -1,0 +1,28 @@
+// RUN: lokinfer-opt --pipeline %s | filecheck %s
+
+// Full pipeline on a static GPU MLP-like graph: exec has no allocations
+// except the output, weights/arena live in init.
+// CHECK-LABEL: init -> (buffer<f32[64, 64]>, buffer<f32[16, 64]>, buffer<f32[16, 64]>, buffer<f32[16, 64]>) {
+// CHECK:         buffer.alloc {arena = true}
+// CHECK:         kernel "transpose_f32_cpu"
+// CHECK-LABEL: exec(%x: buffer<f32[16, 64]>) state(
+// CHECK-NOT:     buffer.alloc :
+// CHECK-NOT:     buffer.free
+// CHECK:         sync gpu_to_cpu
+// CHECK:         kernel "softmax_f32_cpu"
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[16, 64]>) {
+    %w = const.internal @"w" : tensor<f32[64, 64]>
+    %wt = kernel "transpose_f32_cpu"(%w) : tensor<f32[64, 64]>
+    %wg = sync cpu_to_gpu %wt : tensor<f32[64, 64]>
+    %a = kernel "gemm_f32_gpu"(%x, %wg) : tensor<f32[16, 64]>
+    %b = kernel "relu_f32_gpu"(%a) : tensor<f32[16, 64]>
+    %c = kernel "gemm_f32_gpu"(%b, %wg) : tensor<f32[16, 64]>
+    %cc = sync gpu_to_cpu %c : tensor<f32[16, 64]>
+    %d = kernel "softmax_f32_cpu"(%cc) : tensor<f32[16, 64]>
+    return %d
+  }
+}

@@ -1,0 +1,14 @@
+// RUN: not lokinfer-opt %s 2>&1 | filecheck %s
+
+// The verifier runs on load (not a pass). A model in buffer form (a kernel with outs) must have no tensor values left.
+// CHECK: verify: exec argument has tensor type after bufferization
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[N]>, %y: buffer<f32[N]>) {
+    %out = buffer.alloc {output = true} : buffer<f32[N]>
+    kernel "add_f32_cpu"(%x, %y) outs(%out)
+    return %out
+  }
+}

@@ -1,0 +1,12 @@
+// RUN: not lokinfer-opt %s 2>&1 | filecheck %s
+// CHECK: dim.read of %n which is resident on gpu; add ops.to_cpu(...)
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[8]>) {
+    %n = kernel "count_i64_gpu"(%x) : tensor<i64[1]>
+    dim.read %n[0] -> K
+    return %x
+  }
+}

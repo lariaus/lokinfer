@@ -1,0 +1,33 @@
+// RUN: lokinfer-opt --pass=bufferize %s | filecheck %s
+
+// %b reuses %a in place (inplace = [out 0, in 0] and %a dies there).
+// %c can't reuse %b because a view of %b is used later.
+// The view keeps %b alive until its own last use.
+// CHECK-LABEL: exec(
+// CHECK-NEXT:    %a = buffer.alloc : buffer<f32[N, 4]>
+// CHECK-NEXT:    kernel "exp_f32_cpu"(%x) outs(%a)
+// CHECK-NEXT:    kernel "relu_f32_cpu"(%a) outs(%a) {inplace = [0, 0]}
+// CHECK-NEXT:    %v = view %a[0] : buffer<f32[4*N]>
+// CHECK-NEXT:    %c = buffer.alloc : buffer<f32[N, 4]>
+// CHECK-NEXT:    kernel "neg_f32_cpu"(%a) outs(%c) {inplace = [0, 0]}
+// CHECK-NEXT:    %d = buffer.alloc {output = true} : buffer<f32[4*N]>
+// CHECK-NEXT:    kernel "add_f32_cpu"(%v, %v) outs(%d)
+// CHECK-NEXT:    buffer.free %a
+// CHECK-NEXT:    %e = buffer.alloc {output = true} : buffer<f32[N, 4]>
+// CHECK-NEXT:    kernel "copy_f32_cpu"(%c) outs(%e)
+// CHECK-NEXT:    buffer.free %c
+// CHECK-NEXT:    return %d, %e
+model {
+  init {
+    return
+  }
+  exec(%x: tensor<f32[N, 4]>) {
+    %a = kernel "exp_f32_cpu"(%x) : tensor<f32[N, 4]>
+    %b = kernel "relu_f32_cpu"(%a) {inplace = [0, 0]} : tensor<f32[N, 4]>
+    %v = view %b[0] : tensor<f32[4*N]>
+    %c = kernel "neg_f32_cpu"(%b) {inplace = [0, 0]} : tensor<f32[N, 4]>
+    %d = kernel "add_f32_cpu"(%v, %v) : tensor<f32[4*N]>
+    %e = kernel "copy_f32_cpu"(%c) : tensor<f32[N, 4]>
+    return %d, %e
+  }
+}

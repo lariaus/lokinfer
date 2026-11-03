@@ -1,0 +1,28 @@
+W1101 12:14:09.036000 44189 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+<venv>/lib/python3.14/site-packages/torch/nn/modules/rnn.py:1011: UserWarning: dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1, but got dropout=0.2 and num_layers=1
+  super().__init__("LSTM", *args, **kwargs)
+<venv>/lib/python3.14/site-packages/torch/nn/utils/weight_norm.py:145: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+W1101 12:14:18.771000 44189 torch/_inductor/utils.py:1806] [0/0_1] Not enough SMs to use max_autotune_gemm mode
+<venv>/lib/python3.14/site-packages/torch/_inductor/lowering.py:2774: UserWarning: Torchinductor does not support code generation for complex operators. Performance may be worse than eager.
+  warnings.warn(
+W1101 12:14:44.973000 44189 torch/_inductor/codegen/mps.py:211] [1/0_1] float64 cast requested, probably from tensorify_python_scalars
+W1101 12:14:44.974000 44189 torch/_inductor/codegen/mps.py:211] [1/0_1] float64 cast requested, probably from tensorify_python_scalars
+W1101 12:14:44.978000 44189 torch/_inductor/codegen/mps.py:211] [1/0_1] float64 cast requested, probably from tensorify_python_scalars
+W1101 12:14:44.978000 44189 torch/_inductor/codegen/mps.py:211] [1/0_1] float64 cast requested, probably from tensorify_python_scalars
+W1101 12:14:45.090000 44189 torch/_inductor/codegen/mps.py:211] [1/0_1] float64 cast requested, probably from tensorify_python_scalars
+W1101 12:14:45.091000 44189 torch/_inductor/codegen/mps.py:211] [1/0_1] float64 cast requested, probably from tensorify_python_scalars
+W1101 12:14:45.097000 44189 torch/_inductor/codegen/mps.py:211] [1/0_1] float64 cast requested, probably from tensorify_python_scalars
+W1101 12:14:45.097000 44189 torch/_inductor/codegen/mps.py:211] [1/0_1] float64 cast requested, probably from tensorify_python_scalars
+W1101 12:14:45.100000 44189 torch/_inductor/codegen/mps.py:211] [1/0_1] float64 cast requested, probably from tensorify_python_scalars
+W1101 12:14:45.101000 44189 torch/_inductor/codegen/mps.py:211] [1/0_1] float64 cast requested, probably from tensorify_python_scalars
+W1101 12:14:45.501000 44189 torch/_inductor/codegen/mps.py:211] [1/0_1] float64 cast requested, probably from tensorify_python_scalars
+W1101 12:14:45.502000 44189 torch/_inductor/codegen/mps.py:211] [1/0_1] float64 cast requested, probably from tensorify_python_scalars
+{"dev": "mps", "mode": "default", "case": "rand16", "warmup_s": 39.36, "median_ms": 99.0, "min_ms": 98.2}
+{"dev": "mps", "mode": "default", "case": "rand64", "warmup_s": 0.95, "median_ms": 192.1, "min_ms": 189.4}
+{"dev": "mps", "mode": "default", "case": "rand128", "warmup_s": 1.17, "median_ms": 357.6, "min_ms": 336.4}
+{"dev": "mps", "mode": "default", "case": "rand256", "warmup_s": 1.74, "median_ms": 738.4, "min_ms": 693.0}
+{"dev": "mps", "mode": "default", "case": "rand510", "warmup_s": 2.74, "median_ms": 1157.5, "min_ms": 1144.1}
+{"dev": "mps", "mode": "default", "case": "real_short28", "warmup_s": 0.53, "median_ms": 122.1, "min_ms": 120.9}
+{"dev": "mps", "mode": "default", "case": "real_medium117", "warmup_s": 0.95, "median_ms": 299.0, "min_ms": 293.4}
+{"dev": "mps", "mode": "default", "case": "real_long394", "warmup_s": 2.1, "median_ms": 920.1, "min_ms": 906.9}
