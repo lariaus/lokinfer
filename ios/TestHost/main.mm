@@ -71,7 +71,8 @@ std::string lokihost_build_id();  // build_id.mm
 // Runtime-variant knobs this process was launched with (docs/benchmarking.md "CPU runtime variants").
 static std::string runtime_env() {
   std::string r;
-  for (const char* k : {"LOKINFER_THREADS", "LOKINFER_POOL_QOS", "VECLIB_MAXIMUM_THREADS"})
+  for (const char* k : {"LOKINFER_THREADS", "LOKINFER_POOL_QOS", "VECLIB_MAXIMUM_THREADS", "LOKINFER_F16_GEMM",
+                        "LOKINFER_F16T_KERNEL", "LOKINFER_F16T_TILE"})
     if (const char* v = std::getenv(k)) r += std::string(r.empty() ? "" : " ") + k + "=" + v;
   return r;
 }

@@ -1,4 +1,4 @@
-# iPhone reference baselines (ExecuTorch XNNPACK, MLX Swift)
+# iPhone reference baselines (ExecuTorch XNNPACK, MLX Swift, llama.cpp)
 
 **[built, measured 2026-11-01]** Reference timings of Kokoro-82M through other frameworks on the iPhone 18 Pro Max
 (iPhone19,3, iOS 27.0), with M2 Max calibration runs of the same harnesses. lokinfer does **not** depend on any of
@@ -323,3 +323,129 @@ Case ids: `resnet18_n{1,8} mobilenetv2_n{1,8} dcgan_g_n{1,64} dcgan_d_n{1,64} gp
 mnist_b{1,64,1024}`. The phone's `Documents/baselines/other/` still holds the data, about 2.9 GB, mostly the three
 622 MB GPT-2 programs. In those programs the tied `wte` weight is stored twice: once for the embedding, which is
 not delegated, and once packed for XNNPACK's lm_head.
+
+# Qwen3-ASR-1.7B: llama.cpp (iPhone CPU + Metal) and MLX Swift (iPhone GPU), f16
+
+**[built and verified 2026-11-05; dashboard numbers come in Q7]** The iPhone side of the Qwen3-ASR baselines
+(milestone Q6 of [qwen3-asr-port-plan.md](qwen3-asr-port-plan.md); the Mac side and the precision notes are in
+[baselines.md § 8](../baselines.md#8-qwen3-asr-17b-f16)). Two harness apps in `<baselines>/`, built like the Kokoro
+ones (UIScene shell, `RESULT {json}` lines, `exit()`), signed as `<bundle-id>` / `<team-id>` (both read from
+`lokinfer.local.json` by each harness's `gen_project.sh`, which writes `project.yml` and runs XcodeGen), with the
+`com.apple.developer.kernel.increased-memory-limit` entitlement. Same case kinds as the Mac script
+(`bench/models/bench_qwen3asr_baselines.py`): `verify:<clip>`, `enc:<clip>`, `prefill:<clip>`, `decode:<clip>[@C]`,
+`e2e:<clip>`; same timing protocol (warm-up ≥ 2 calls and ≥ 1 s, then ≥ 7 runs, stop at ≥ 30 runs or ≥ 2 s; one
+warm-up and ≥ 3 runs when a call takes > 10 s; median). Each `RESULT` carries `state_before` / `state_after`
+(thermal, Low Power Mode, power, `os_proc_available_memory`).
+
+Inputs: `<baselines>/scripts/prep_qwen3asr.py` (run with lokinfer's `.venv`) writes per clip `<clip>.wav` (16 kHz
+int16, exact), `<clip>.ref` (prompt length T, `max_new`, the caller contract's prompt ids, the f32 CPU reference
+tokens and text, N_a, F) and `<clip>.f32` (the processor's features `[128, 100 n]`) into `<baselines>/qwen3asr/data/`;
+the reference transcript is lokinfer's f32 CPU `R.manual_generate`.
+
+## llama.cpp (`<baselines>/llamacpp-ios/`)
+
+- **llama.cpp** release b12125 (commit `7d516e25`), a codeload tarball in `<baselines>/llama.cpp` (Qwen3-ASR =
+  PR #19441 + #23073 / #23081). iOS framework: `GGML_BLAS_DEFAULT=OFF GGML_CPU_ARM_ARCH=armv8.6-a+fp16
+  ./build-xcframework.sh ios-device`. Both variables come from `<baselines>/patches/llama.cpp-build-xcframework-f16.patch`
+  (the stock script hard-codes BLAS on and builds the CPU code without FP16 vector arithmetic, which would make the CPU
+  path f32 compute: Accelerate `sgemm` on f32-converted weights, or f16 → f32 conversion + f32 FMA). The app prints
+  `FP16_VA = 1` in llama.cpp's system info.
+- **Model**: the f16 GGUF pair (`Qwen3-ASR-1.7B-F16.gguf` 3.21 GiB + `mmproj-Qwen3-ASR-1.7B-F16.gguf` 612 MiB, see
+  baselines.md § 8) in the app container's `Documents/baselines/qwen3asr/`, with the clip files.
+- **Harness**: `core/qwen3asr_llama.{h,cpp}` (libllama + libmtmd C API), shared by the iOS app (`App/main.mm`) and a
+  Mac CLI (`MacCLI/main.cpp`, `build_mac.sh` against `<baselines>/llama.cpp/build`). The prompt is the caller
+  contract's (empty system turn, the audio between `<|audio_start|>` / `<|audio_end|>`, assistant prefix
+  `language English<asr_text>`). CPU = `n_gpu_layers 0` with an empty device list, `offload_kqv` / `op_offload` off and
+  mmproj without GPU (nothing runs on Metal); Metal = every layer and the mmproj on the GPU. `n_batch` 2048 (the
+  contract's prefill chunk), llama.cpp's default `n_ubatch` 512 and flash-attention `auto`; greedy = argmax over the f32
+  logits, stop on EOG or `max_new`. `enc` = `mtmd_encode_chunk` over every audio chunk of the clip (mel features
+  untimed); `prefill` = the reference prompt ids through `llama_decode` after a cache clear; `decode@C` = one
+  `llama_decode` of 1 token on a cache of C − 1 entries (prompt + teacher-forced reference tokens, built untimed,
+  cropped with `llama_memory_seq_rm` after every step); `e2e` = `mtmd_helper_eval_chunks` + the greedy loop.
+- **Verified on the iPhone** (2026-11-05): `verify:s10` and `verify:s30` transcripts equal the f32 CPU reference on
+  CPU (6 threads) and on Metal (`results/qwen3asr_llamacpp_iphone_verify_{cpu,metal}.log`). Footprint after load ≈
+  1.2 GB: the GGUF is mmap'ed (file-backed pages are not in the app's footprint); Metal: 3.28 GB mapped LM, KV 448 MB at
+  `n_ctx` 4096, compute buffers 317 + 554 MB, the mmproj weights (612 MB) copied into a Metal buffer.
+- **Work difference**: llama.cpp's qwen3a preprocessing pads each 8 s window's last partial 1 s chunk to 100 frames and
+  keeps all its 13 tokens, so its prompt has up to 12 more audio tokens than the reference (s10: 161 vs T = 149; s30:
+  408 vs 401). `enc` / `e2e` include that extra work; `prefill` / `decode` use the reference ids (exact T and C).
+- **Timed on the iPhone** (2026-11-06, dashboard rows, `results/qwen3asr_llamacpp_iphone_{cpu,metal}_20261106.log`;
+  long clips `..._metal_long_20261106.log`, `n_ctx` 7168): 2–30 s and, on Metal, 60 / 111 / 300 s. `verify:s300` on
+  Metal differs from the reference in 3 of 754 words (two commas, "side" → "sides"): llama.cpp's front end feeds 11
+  more audio tokens on that clip, so an exact greedy match over 5 min is not expected. The rows were recorded with
+  `record_qwen3asr_iphone_baselines.py --max-word-diffs 8` (≈ 1 % of the words; the diff is in each row's notes);
+  short clips stay exact. (The 2026-11-05 attempt had been killed by a deploy's watchdog; `ios_deploy.sh` now takes
+  the phone lock.)
+
+## MLX Swift (`<baselines>/qwen3asr-mlx-swift/`)
+
+- **mlx-audio-swift** main @ `927d4e30` (2026-11-03; the repo moved from `Blaizzy/` to `Neywa-Labs/mlx-audio-swift`),
+  codeload tarball in `<baselines>/mlx-audio-swift`, **patched** (`patches/mlx-audio-swift-qwen3asr-lokinfer.patch`):
+  the encoder's sinusoid table (an f32 constant) is cast to the activations' dtype before the add (`asType(x.dtype)`,
+  as HF does). Without it, `f16 + f32` promotes the whole encoder after `conv_out` to f32. The audio tower, the text
+  model and the embedding are also made `public`, so the harness can call them. mlx-swift **0.33.0** (exact pin in
+  `project.yml`).
+- **Weights**: `<baselines>/models/qwen3-asr-mlx-f16/` (`config.json` = the pinned snapshot's, `model.safetensors`
+  4.08 GB, 707 tensors, all f16, mlx-audio key layout), written once on the Mac by
+  `<baselines>/scripts/convert_qwen3asr_mlx_f16.py` (`astype(float16)` per tensor). Casting bf16 → f16 at load on the
+  phone would hold both copies (≈ 8 GB > the 6.1 GB app limit). The app checks 707/707 tensors f16 at load.
+- **Harness**: `App/Bench.swift` (shared), `App/AppMain.swift` (iOS app `MlxQwen3Asr`, `--mlx-qwen3asr W R case...`),
+  `MacCLI/main.swift` (`MlxQwen3AsrMac`). It feeds lokinfer's prepared inputs (features from `<clip>.f32`, the contract's
+  prompt ids, so the work is identical) to mlx-audio-swift's modules: audio tower, text model, `KVCacheSimple`, tied
+  embedding `asLinear` on the last row only, concatenate splice. Decode crops the cache by `offset -= 1` (the
+  `KVCacheSimple.trim` it inherits is a no-op). `Memory.clearCache()` before every case. Memory caps through env as
+  for Kokoro: the recorded setting is `MLX_MEMLIMIT_MB=5500 MLX_CACHE_MB=1024` (weights 3.9 GB active, peak 4.0–4.2 GB
+  on s10 / s30).
+- **Verified** on the Mac CLI and on the iPhone (2026-11-05): the s10 and s30 greedy **tokens** equal the f32 CPU
+  reference token for token (`results/qwen3asr_mlxswift_iphone_verify.log`).
+- **Indicative iPhone timings** (2026-11-05, AC, LPM off, thermal nominal before and after; not dashboard numbers,
+  `results/qwen3asr_mlxswift_iphone_indicative.log`): s10 enc 41.2 ms, prefill (T = 149) 68.7 ms, decode @170
+  32.7 ms, e2e 811 ms; s30 enc 96.7 ms, prefill (T = 401) 145.0 ms, decode @480 33.2 ms, e2e 2919 ms.
+
+- **Timed on the iPhone** (2026-11-06, dashboard rows): 2–30 s (`results/qwen3asr_mlxswift_iphone_20261106.log`) and
+  60 / 111 / 300 s (`..._long_20261106.log`, after a 10 min cool-down; the phone reached "serious" by the 300 s cases).
+  `verify:s300` differs from the reference by one token: a comma after "imagination" (token 11 at position 48), the
+  same spot as llama.cpp's first difference: an f16 near-tie in the model. Recorded with `--max-word-diffs 8`
+  (token-level diff against `s300.ref`).
+
+## Reproducing (Qwen3-ASR)
+
+```sh
+B=<baselines>; U=<udid>; L=$PWD   # from the lokinfer repo root, inside scripts/lk-lock /tmp/lokinfer-phone.lock
+.venv/bin/python $B/scripts/prep_qwen3asr.py s2 s5 s10 s30      # + s60 s111 s300 (computes their f32 references)
+pkill -f lokinfer-ios-watchdog
+cp() { xcrun devicectl device copy to --device $U --domain-type appDataContainer \
+       --domain-identifier <bundle-id> --source "$1" --destination "Documents/baselines/$2"; }
+for c in s2 s5 s10 s30 s60 s111 s300; do for e in wav ref f32; do cp $B/qwen3asr/data/$c.$e qwen3asr/$c.$e; done; done
+cp $B/models/qwen3-asr/Qwen3-ASR-1.7B-F16.gguf qwen3asr/Qwen3-ASR-1.7B-F16.gguf
+cp $B/models/qwen3-asr/mmproj-Qwen3-ASR-1.7B-F16.gguf qwen3asr/mmproj-Qwen3-ASR-1.7B-F16.gguf
+cp $B/models/qwen3-asr-mlx-f16/config.json qwen3asr-mlx/config.json
+cp $B/models/qwen3-asr-mlx-f16/model.safetensors qwen3asr-mlx/model.safetensors
+
+# llama.cpp (CPU and Metal)
+cd $B/llama.cpp && GGML_BLAS_DEFAULT=OFF GGML_CPU_ARM_ARCH=armv8.6-a+fp16 ./build-xcframework.sh ios-device
+cd $B/llamacpp-ios && LOKINFER=$L ./gen_project.sh && xcodebuild -project LlamaAsr.xcodeproj -scheme LlamaAsr \
+  -configuration Release -destination generic/platform=iOS -allowProvisioningUpdates -derivedDataPath build/dd build
+xcrun devicectl device install app --device $U build/dd/Build/Products/Release-iphoneos/LlamaAsr.app
+xcrun devicectl device process launch --device $U --console --terminate-existing <bundle-id> \
+  -- --llama-asr metal 0 2 7 4096 verify:s10 verify:s30 enc:s10 prefill:s10 decode:s10 e2e:s10   # cpu|metal THREADS W R N_CTX
+#   long clips (60 / 111 / 300 s): N_CTX 7168 (s300 needs >= 6,446); record with --max-word-diffs 8
+./build_mac.sh && ./llamacpp_asr_mac $B/qwen3asr/data metal 8 2 7 4096 verify:s10 ...   # Mac CLI, same core
+
+# MLX Swift (GPU)
+cd $B/qwen3asr-mlx-swift && LOKINFER=$L ./gen_project.sh && xcodebuild -project MlxQwen3Asr.xcodeproj \
+  -scheme MlxQwen3Asr -configuration Release -destination generic/platform=iOS -allowProvisioningUpdates \
+  -derivedDataPath build/dd -clonedSourcePackagesDirPath build/spm build
+xcrun devicectl device install app --device $U build/dd/Build/Products/Release-iphoneos/MlxQwen3Asr.app
+xcrun devicectl device process launch --device $U --console --terminate-existing \
+  --environment-variables '{"MLX_MEMLIMIT_MB":"5500","MLX_CACHE_MB":"1024"}' <bundle-id> \
+  -- --mlx-qwen3asr 2 7 verify:s10 verify:s30 enc:s10 prefill:s10 decode:s10 e2e:s10
+# Mac CLI: xcodebuild ... -scheme MlxQwen3AsrMac ...; DYLD_FRAMEWORK_PATH=build/dd/Build/Products/Release/PackageFrameworks \
+#   build/dd/Build/Products/Release/MlxQwen3AsrMac $B/models/qwen3-asr-mlx-f16 $B/qwen3asr/data 2 7 verify:s10 ...
+
+cd $L && scripts/ios_deploy.sh   # afterwards: put LokiHost back
+```
+
+The phone's app container held about 8.2 GB for this (both model copies). On 2026-11-05 the other baselines' data in
+`Documents/baselines/` (Kokoro, `other/`) was already gone: LokiHost was not installed when the first Qwen3-ASR
+harness was installed, so the data container had been reset. Re-copy that data before re-running those harnesses.

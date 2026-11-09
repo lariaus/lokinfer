@@ -179,6 +179,13 @@ timing protocol and fails when slower than the per-device baseline in `tests/per
 (margins from measured run-to-run noise). Add `LOKINFER_IPHONE=<udid>` to also check the phone (remote executor).
 Update the baseline after an intended speedup. Opt-in because it needs an idle machine and ~30 s.
 
+## Long runs: watch them
+
+Large models (GBs of weights): see [big-models.md](big-models.md) for the full playbook (estimates, machine state, moving weights to the
+iPhone, device-resident state, profiling, correctness at that size).
+
+Rule (user, 2026-11-05): Before launching any benchmark, test sweep, deploy or agent job, estimate its total wall time (calls × runs × cases) and shrink anything over ~20-30 min. While it runs, check it actively at least every 5 minutes: progress in its log, who holds each `/tmp/lokinfer-*.lock` (`lsof -t`), stuck or zombie processes, the phone reachable, swap. Make sure nothing is blocked and unblock it at once. Never sit idle waiting for a notification: keep doing other unblocked work meanwhile. (A full-dashboard sweep once held the Mac for 4.5 h while nothing else happened.)
+
 ## Shared-resource locks (concurrent sessions) [built]
 
 Several sessions (agents) may build, benchmark and use the iPhone at the same time. Timing runs must not overlap
@@ -190,8 +197,9 @@ read Kokoro GPU real117 at 305 ms instead of 248 ms). Wrap the command in `scrip
 |---|---|
 | `/tmp/lokinfer-build.lock` | building the shared `build/` dir (`cmake --build build`) — **also take the macbench lock** around any build (`scripts/lk-lock /tmp/lokinfer-macbench.lock scripts/lk-lock /tmp/lokinfer-build.lock cmake --build build`): a build loads every core and corrupts a concurrent Mac timing run |
 | `/tmp/lokinfer-macbench.lock` | any Mac timing or profiling run (bench scripts, `prof-lokinfer`, `prof-torch`, pytest perf tests), and any build (Mac `cmake --build`, the iOS build inside `scripts/ios_deploy.sh`, which takes it itself) |
-| `/tmp/lokinfer-phone.lock` | any iPhone session (`scripts/ios_deploy.sh`, remote benches, `prof-lokinfer -d iphone-*`) |
+| `/tmp/lokinfer-phone.lock` | any iPhone session (remote benches, `prof-lokinfer -d iphone-*`, baseline apps); `scripts/ios_deploy.sh` takes it itself (it relaunches LokiHost, killing whatever runs on the phone) unless `LOKINFER_PHONE_LOCK_HELD=1` says the caller holds it |
+| `/tmp/lokinfer-bigmodel.lock` | any Mac job that holds a full multi-GB model in memory (Qwen3-ASR: torch, torch.compile, MPS, MLX, llama.cpp, golden-data capture): one at a time, so the 32 GB Mac does not swap; check `sysctl vm.swapusage` first. Timed jobs take it before the macbench lock |
 
-Lock order is always phone → macbench → build when nesting (never the reverse), so sessions can't deadlock.
+Lock order is always phone → bigmodel → macbench → build when nesting (never the reverse), so sessions can't deadlock.
 
 Shell pipelines go through `sh -c '...'`: `scripts/lk-lock /tmp/lokinfer-macbench.lock sh -c 'prof-lokinfer run ... | grep e2e'`.

@@ -1,0 +1,14 @@
+// RUN: not lokinfer-opt %s 2>&1 | filecheck %s
+
+// An inout kernel may not write an immutable (tensor) input: it would change the caller's data behind its back.
+// CHECK: writes operand #0 in place, but it is neither a mutable input nor persistent state
+model {
+  init {
+    return
+  }
+  exec(%kc: tensor<f32[8, 4]>, %vc: buffer<f32[8, 4]> mutable, %q: tensor<f32[1, 12]>, %p: tensor<i64[1]>) -> tensor<f32[1, 12]> {
+    kernel "kv_write_rows_f32_cpu"(%kc, %vc, %q, %p) {inout = [0, 1]}
+    %o = kernel "add_f32_cpu"(%q, %q) : tensor<f32[1, 12]>
+    return %o
+  }
+}

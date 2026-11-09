@@ -261,6 +261,49 @@ def _gpt2_ref():
     return gpt2.torch_reference()
 
 
+# ------------------------------------------------------------------------------------------------------ Qwen3-ASR
+
+def _qwen3asr(part: str) -> Target:
+    """Qwen3-ASR-1.7B optimized ("fused") graphs, bench_qwen3asr.py's cases on the golden inputs (Q1 data).
+    enc: the encoder on a clip. prefill: one <= 2048-id chunk at pos 0 (the clip's whole prompt when T <= 2048).
+    decode: one step attending over C keys; the cache is not prefilled (the work does not depend on its contents).
+    The KV cache is the caller's mutable input, allocated on the build's device (build runs before inputs)."""
+    _repo_on_path()
+    box = {}
+
+    def build(device):
+        from models.qwen3_asr import model as M
+
+        box["device"] = device
+        sd = M.load_weights_opt()
+        return (M.build_encoder if part == "enc" else M.build_generate)(sd, device, variant="opt")
+
+    def clip(case):
+        from models.qwen3_asr import reference as R
+
+        return R.load_ref("s" + case.split()[1].rstrip("s"))
+
+    def inputs(case):
+        from models.qwen3_asr import model as M
+
+        if part == "enc":
+            r = clip(case)
+            return [np.ascontiguousarray(r["inputs/features"]), np.ascontiguousarray(r["inputs/n_audio"])]
+        if part == "prefill":
+            r = clip(case)
+            ids, n_audio = r["inputs/ids"][:2048], int(r["inputs/n_audio"][0])
+            k1 = min(max(len(ids) - M.AUDIO_START, 0), n_audio)
+            audio = (np.random.default_rng(0).standard_normal((k1, M.LM_D)) * 0.02).astype(np.float16)
+            return [np.ascontiguousarray(ids), audio, np.array([0], np.int64), M.kv_cache(len(ids), box["device"])]
+        c = int(case.split("=")[1])
+        return [np.array([11], np.int64), np.zeros((1, M.LM_D), np.float16), np.array([c - 1], np.int64),
+                M.kv_cache(c, box["device"])]
+
+    cases = {"enc": ["enc 10s", "enc 30s", "enc 300s"], "prefill": ["prefill 10s", "prefill 30s", "prefill 300s"],
+             "decode": ["decode C=170", "decode C=480", "decode C=4096", "decode C=15600"]}[part]
+    return Target(f"qwen3asr_{part}", "Qwen3-ASR-1.7B", cases, cases[1], inputs, build, None)
+
+
 REGISTRY: dict[str, Callable[[], Target]] = {
     "kokoro": _kokoro,
     "mnist": _mnist,
@@ -270,6 +313,9 @@ REGISTRY: dict[str, Callable[[], Target]] = {
     "dcgan_d": lambda: _dcgan("d"),
     "gpt2": _gpt2,
     "gpt2_decode": _gpt2_decode,
+    "qwen3asr_enc": lambda: _qwen3asr("enc"),
+    "qwen3asr_prefill": lambda: _qwen3asr("prefill"),
+    "qwen3asr_decode": lambda: _qwen3asr("decode"),
 }
 
 

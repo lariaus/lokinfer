@@ -24,6 +24,10 @@ DB = ROOT / "perf" / "results.json"
 # Chart metadata: case order on the X axis and a one-line description per chart group.
 DEFAULT_META = {
     "models": {
+        "Qwen3-ASR-1.7B": {
+            "cases": ["enc 2s", "enc 5s", "enc 10s", "enc 30s", "enc 60s", "enc 111s", "enc 300s", "enc 1200s", "prefill 2s", "prefill 5s", "prefill 10s", "prefill 30s", "prefill 60s", "prefill 111s", "prefill 300s", "prefill 1200s", "decode 2s", "decode 5s", "decode 10s", "decode 30s", "decode 60s", "decode 111s", "decode 300s", "decode 1200s", "e2e 5s", "e2e 30s", "e2e 111s", "e2e 300s", "e2e 1200s", "e2e 30min"],
+            "description": "speech -> text, f16 on every device (lokinfer and every baseline; f32 only inside norms, softmax, RoPE tables and accumulators). Real read speech (LibriSpeech test-clean, clips of ~2 s to 20 min). enc = audio encoder (mel features -> audio embeddings); prefill = the whole prompt (18 + 13 tokens per second of audio) through the LM, chunks of <= 2048; decode = one token at the clip's final context (prompt + its transcript); e2e = encoder + prefill + the full greedy transcription (model time only). 1200s (one 20 min pass) and 30min (two caller-split passes) are Mac only. Phase 1: measured, not yet optimized (docs/models/qwen3-asr.md).",
+        },
         "Kokoro-82M": {
             "cases": ['word', 'real28', 'app47f', 'app47m', 'app59f', 'app59m', 'app71f', 'app71m', 's6f', 's6m', 's9f', 's9m', 'real117', 's20f', 's28f', 'rand510'],
             "description": "ids + style + speed -> audio, one forward pass. appNN{f,m} = real sentences at the p5/median/p95 token length (T = 47/59/71, 3-5 s) of the app's TTS workload, in the app's two voices (f = af_heart, m = am_echo); s6/s9{f,m} = 6 s / 8 s sentences; s20f = a 20 s paragraph; s28f = a real-text near-max chunk (T = 487, 26 s); word = one-word edge (T = 9); real28 / real117 = older short / long cases; rand510 = max context with random ids",
@@ -83,6 +87,12 @@ def record(model: str, device: str, case: str, impl: str, value: float, *, secti
             and float(value) >= old["value"]):
         print(f"perfdb: kept the nominal entry for {model} / {device} / {case} / {impl} "
               f"(new measurement was at thermal {new_th})")
+        return False
+    # Low Power Mode throttles CPU / GPU like heat does (2026-11-06: a "nominal"-thermal iPhone run in Low Power Mode
+    # overwrote faster full-power rows): an LPM measurement never replaces a faster non-LPM one.
+    if (old and not (old.get("state") or {}).get("low_power_mode") and (state or {}).get("low_power_mode")
+            and float(value) >= old["value"]):
+        print(f"perfdb: kept the full-power entry for {model} / {device} / {case} / {impl} (new one: Low Power Mode)")
         return False
     entry = {"section": section, "model": model, "device": device, "case": case, "impl": impl,
              "value": round(float(value), 4), "unit": unit,

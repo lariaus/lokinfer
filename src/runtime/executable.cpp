@@ -504,10 +504,15 @@ Status Executable::Impl::lower(const Region& r, std::vector<Instr>& out) {
 // ranges conflict (RAW, WAW, WAR) with dispatches since the last barrier.
 void Executable::Impl::gpuHazards(const Instr& in) {
   HazardTracker& h = hazards;
+  // A new segment may already hold dispatches of the previous kernel: a commit inside a kernel (GPU work budget,
+  // params ring full) puts its later dispatches into the new command buffer, unseen by this tracker. Order this
+  // kernel after them (2026-11-06: forced mid-kernel commits read audio_cnn's output before conv_out wrote it).
+  bool newSegment = false;
   if (h.segment != gpu->segmentId()) {
     h.writes.clear();
     h.reads.clear();
     h.segment = gpu->segmentId();
+    newSegment = true;
   }
   std::vector<HazardTracker::Range> rs, ws;
   std::vector<bool> written(in.args.size(), false);  // outs, plus `inout` operands (written in place)
@@ -525,7 +530,7 @@ void Executable::Impl::gpuHazards(const Instr& in) {
     HazardTracker::Range r{in.bufs[i].mtlBuffer, in.bufs[i].offset, in.bufs[i].offset + bytes};
     (written[i] ? ws : rs).push_back(r);
   }
-  bool conflict = false;
+  bool conflict = newSegment;
   for (const auto& r : rs) conflict = conflict || HazardTracker::overlaps(h.writes, r);
   for (const auto& w : ws) conflict = conflict || HazardTracker::overlaps(h.writes, w) || HazardTracker::overlaps(h.reads, w);
   if (conflict) {
@@ -1035,6 +1040,11 @@ Status Executable::run(std::span<const TensorView> inputs, std::vector<OwnedTens
         c = Impl::InputWrap{v.data, bytes, v.owner, w, off};
         s = Slot{static_cast<char*>(v.data), w->mtlBuffer, off, nullptr, 0};
       } else {
+        // A mutable input is written in place: a copy would silently drop the writes.
+        if (m.exec.isMutableArg(i))
+          return Status::error("input " + std::to_string(i) +
+                               " is mutable but its memory can't be used by the GPU without a copy (give it an owner, "
+                               "or pass a GPU tensor)");
         c = Impl::InputWrap{};
         LK_RETURN_IF_ERROR(im.allocSlot(args[i], bytes));
         std::memcpy(s.ptr, v.data, bytes);
@@ -1043,6 +1053,25 @@ Status Executable::run(std::span<const TensorView> inputs, std::vector<OwnedTens
       s = Slot{static_cast<char*>(v.data), v.mtlBuffer, v.mtlOffset, nullptr, 0};
     }
   }
+
+  // A mutable input must not share memory with any other input: kernels would read values the call itself rewrites.
+  if (!m.exec.mutableArgs.empty())
+    for (size_t i = 0; i < args.size(); ++i) {
+      if (!m.exec.isMutableArg(i)) continue;
+      const auto span = [&](size_t k) {
+        size_t bytes = dtypeSize(inputs[k].dtype);
+        for (int64_t d : inputs[k].shape) bytes *= static_cast<size_t>(d);
+        auto* p = static_cast<const char*>(inputs[k].data);
+        return std::pair<const char*, const char*>{p, p + bytes};
+      };
+      auto [a0, a1] = span(i);
+      for (size_t k = 0; k < args.size(); ++k) {
+        if (k == i || m.typeOf(args[k])->isScalar()) continue;
+        auto [b0, b1] = span(k);
+        if (a0 < b1 && b0 < a1)
+          return Status::error("input " + std::to_string(i) + " is mutable and overlaps input " + std::to_string(k));
+      }
+    }
 
   const auto callStart = std::chrono::steady_clock::now();
   if (im.profOpts.level > 0) {

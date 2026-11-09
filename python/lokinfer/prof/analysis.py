@@ -108,8 +108,10 @@ def flops_of(name: str, sig: str) -> float | None:
     rows = out[-1] if channel_first else 1
     for d in ([] if channel_first else out[:-1]):
         rows *= d
+    # rmsnorm_gemm*(x, g, w): the weight is the 3rd input (the 2nd is the norm's gains)
+    wi = 2 if name.startswith("rmsnorm_gemm") and len(shapes) > 2 else 1
     w = 1
-    for d in shapes[1]:
+    for d in shapes[wi]:
         w *= d
     return 2.0 * rows * w
 

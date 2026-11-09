@@ -154,6 +154,55 @@ the reduction costs no extra pass. Both kernels share `splitKEffective` (the con
 64×64 tiles already fill the GPU (≥ 48 tiles on the Mac; always on the iPhone, `kSplitKMaxTiles = 0`) the producer
 runs MPS into plane 0 and the consumer reads one plane.
 
+### f16 tensor-op GEMM (`f16_tensor.metal`: `lk_f16t_gemm`, `lk_f16t_gemm_swiglu`) [built 2026-11-07]
+
+The M > 1 path of the Qwen3-ASR f16 optimized GEMM ops (`gemm*_opt_f16_gpu`, `gemm_swiglu_opt_f16_gpu`,
+`rmsnorm_gemm*_opt_f16_gpu` for M > 1, `audio_cnn_opt`'s convs) on GPUs with neural accelerators: Metal 4 tensor ops
+(`mpp::tensor_ops::matmul2d`, MetalPerformancePrimitives), half in, float accumulation (`relaxed_precision = false`),
+the same fused epilogues as the steel f16 kernels (+ bias, GELU(erf), + residual, clamp; SwiGLU) on the float
+accumulators, one rounding. Structure after MLX's NAX GEMM (mlx 0.33 `steel/gemm/nax.h`): no threadgroup memory, each
+simdgroup owns a 32×32 output block held in the destination cooperative tensor of one
+`matmul2d<(32, 32, 32), execution_simdgroup>` across the K loop, and fills the input cooperative tensors straight
+from device memory each K step of 32; a `mem_none` threadgroup barrier every BK = 512 keeps the simdgroups in
+lockstep. Tiles 64×128 (2×4 simdgroups) when its grid has ≥ 32 threadgroups, else 64×64 (2×2); 128×128 (4×4, MLX's
+iPhone choice) only when forced: in-model on the iPhone 64×128 won (prefill 30 s 150.6 vs 165.3 ms, 300 s 1,922 vs
+2,064, enc 300 s 565 vs 590). MLX's swizzle (1 once the grid has > 3 row blocks); `_nt` variants for B^T (audio_cnn).
+
+Selection (`f16_gpu.cpp`, at model load; `kTensorGemmDefault = true` since 2026-11-07 21:17, after the phone ran the
+kernel slow tier and the Qwen model tests): on when the GPU is in the Apple10 family or later (A19 / M5 and newer: the
+iPhone 18 Pro Max); the M2 Max keeps steel (tensor ops run on its shader ALUs there: 1.8–2.2× slower than steel at
+M = 2048). `LOKINFER_F16_GEMM=tensor | steel` overrides (the Mac tests force it on, `tests/kernels/
+test_f16_fused_gpu.py`'s `gemm_path`); `LOKINFER_F16T_TILE=128x128 | 64x128 | 64x64` forces a tile (tuning).
+
+Two kernel flavours. The layout-agnostic one fills / reads the cooperative tensors element by element through
+`get_multidimensional_index` (correct on any GPU: the Mac tests force it). `_nax` is MLX's scheme exactly: 16×16
+register fragments in the neural accelerators' lane layout (4 contiguous halves per row: vector loads) copied into
+`matmul2d<(16, 32, 16)>` operands; only correct where that layout holds (wrong on the M2). On the iPhone `_nax` is
+~2× faster (the element-wise fills were the cost) and passes the same tests; `LOKINFER_F16T_KERNEL=generic | nax`
+overrides the per-device choice (default: `_nax` on Apple10+, validated on the phone 2026-11-07), `naxr` adds `relaxed_precision = true` (MLX's setting) on the 128×128 GEMM: no gain
+on the phone (qkv M = 401 0.932 vs 0.933 ms), so the f32-accumulation contract costs nothing.
+
+iPhone 18 Pro Max, kernel bench (`bench_f16_fused_gpu.py --iphone --opt-only`, 2026-11-07, nominal → fair), ms:
+
+| case | steel (2026-11-06) | tensor, layout-agnostic | tensor, `_nax` | `_nax` vs steel | `_nax` TF/s |
+|---|---|---|---|---|---|
+| gemm qkv M=44 [2048x4096] | 0.432 | 0.257 | 0.152 | 2.8× | 4.9 |
+| gemm qkv M=401 [2048x4096] | 3.21 | 1.85 | 0.933 | 3.4× | 7.2 |
+| gemm qkv M=2048 [2048x4096] | 13.1 | 8.38 | 4.24 | 3.1× | 8.1 |
+| gemm_add o M=2048 [2048x2048] | 7.38 | 4.24 | 2.24 | 3.3× | 7.7 |
+| gemm_swiglu M=2048 [2048x2x6144] | 39.8 | 24.2 | 13.4 | 3.0× | 7.7 |
+| gemm_add down M=2048 [6144x2048] | 19.6 | 12.8 | 6.83 | 2.9× | 7.5 |
+| gemm_bias enc qkv M=3900 [1024x3072] | 9.73 | 7.14 | 3.56 | 2.7× | 6.9 |
+| gemm_bias_add enc o M=3900 [1024x1024] | 3.72 | 2.37 | 1.14 | 3.3× | 7.2 |
+| gemm_bias_gelu enc fc1 M=3900 [1024x4096] | 13.3 | 9.09 | 5.92 | 2.2× | 5.5 |
+| gemm_bias_add_clamp enc fc2 M=3900 [4096x1024] | 12.5 | 8.12 | 4.04 | 3.1× | 8.1 |
+
+Two pitfalls (2026-11-07): (1) MLX copies 16×16 register fragments into the cooperative tensors assuming the
+neural-accelerator lane layout; on the M2 that layout is different and every result was wrong. lokinfer fills and
+reads the cooperative tensors through `get_multidimensional_index` (index 0 = column, 1 = row), so one kernel is
+correct on both. (2) A BK loop nested around the K-step loop lost the accumulator between iterations on the M2 (only
+the last K step survived); the kernel uses one flat K loop with the barrier every BK / 32 steps.
+
 ### MPS on lokinfer's encoder (`mps.mm`)
 
 `MPSNDArrayMatrixMultiplication` (α = 1, β = 0), prepared once per op, encoded with

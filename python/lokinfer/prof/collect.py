@@ -14,6 +14,8 @@ import statistics
 import time
 from pathlib import Path
 
+import numpy as np
+
 from .. import localconfig
 from . import analysis
 from .targets import ROOT, Target, target_for
@@ -143,16 +145,37 @@ def profile_lokinfer(model_name: str, device: str, case: str | None = None, *, i
             state0 = dev.state()
             mid = dev.load(model)
             inputs = tgt.remote_inputs(case)
-            _, t = dev.run(mid, inputs, warmup=1, iters=3)
-            est = max(statistics.median(t) / 1e6, 0.01)
+            # Big inputs (KV caches, ...) go up once as device tensors and are bound in place through RUN2: RUN
+            # re-sent every argument on each call (a 117 MB KV cache per call for Qwen3-ASR decode), and a mutable
+            # input must be a device tensor anyway. Zeroed ones are not even sent (alloc_tensor zeroes).
+            held = []
+            if dev.supports("run2") and dev.supports("device_tensors"):
+                for i, a in enumerate(inputs):
+                    if isinstance(a, np.ndarray) and a.nbytes >= (1 << 20):
+                        t = dev.alloc_tensor(a.dtype, a.shape)
+                        held.append(t)
+                        if a.any():
+                            dev.write_tensor(t, a)
+                        inputs[i] = t
+
+                def call(warmup, iters):
+                    return [x * 1e-6 for x in dev.run2(mid, inputs, return_outputs=False, warmup=warmup,
+                                                         iters=iters)[2]]
+            else:
+                def call(warmup, iters):
+                    return [x / 1e6 for x in dev.run(mid, inputs, warmup=warmup, iters=iters)[1]]
+            t = call(1, 3)
+            est = max(statistics.median(t), 0.01)
             warm = int(min(5000, max(3, warm_time * 1e3 / est)))
             n = int(min(5000, max(runs, min_time * 1e3 / est)))
-            log(f"  timing on the phone: {warm} warm-up + {n} measured calls ...")
-            _, times = dev.run(mid, inputs, warmup=warm, iters=n)
-            e2e = [x / 1e6 for x in times]
+            log(f"  timing on the phone: {warm} warm-up + {n} measured calls"
+                + (f" ({len(held)} inputs held on the device)" if held else "") + " ...")
+            e2e = call(warm, n)
             dev.set_profile(mid, 1, serialize)
-            dev.run(mid, inputs, warmup=0, iters=iters)
+            call(0, iters)
             dev.set_profile(mid, 0)
+            for t_ in held:
+                dev.free_tensor(t_)
             raw = dev.take_profile(mid)
             state1 = dev.state()
             state = {"start": {k: state0.get(k) for k in ("thermal", "low_power_mode")},

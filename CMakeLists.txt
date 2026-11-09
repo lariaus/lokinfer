@@ -66,7 +66,8 @@ loki_add_metallib(lokinfer_metallib
   OUTPUT ${LOKINFER_METALLIB}
   SOURCES kernels/gpu/elementwise.metal kernels/gpu/gemm.metal kernels/gpu/transpose.metal
           kernels/gpu/kokoro_lc.metal kernels/gpu/kokoro_tok.metal kernels/gpu/vision.metal
-          kernels/gpu/gemm_steel.metal kernels/gpu/winograd.metal
+          kernels/gpu/gemm_steel.metal kernels/gpu/winograd.metal kernels/gpu/f16_basic.metal
+          kernels/gpu/f16_fused.metal kernels/gpu/f16_tensor.metal
   INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/third_party/mlx_steel)
 
 add_library(lokinfer_runtime STATIC
@@ -88,15 +89,19 @@ add_library(lokinfer_runtime STATIC
   kernels/cpu/sme2_gemm.cpp
   kernels/cpu/conv2d.cpp
   kernels/cpu/decode.cpp
+  kernels/cpu/f16_basic.cpp
+  kernels/cpu/f16_fused.cpp
+  kernels/cpu/f16_sme2.cpp
   kernels/gpu/dispatch.cpp
   kernels/gpu/kokoro_lc.cpp
   kernels/gpu/mps.mm
   kernels/gpu/transformer_gpu.cpp
   kernels/gpu/winograd.cpp
+  kernels/gpu/f16_gpu.cpp
 )
 set_source_files_properties(kernels/gpu/mps.mm PROPERTIES COMPILE_OPTIONS -fobjc-arc)
 # SME2 streaming kernels (A19 / M4+; runtime-checked). No +sve: non-streaming SVE doesn't exist on Apple CPUs.
-set_source_files_properties(kernels/cpu/sme2_conv.cpp kernels/cpu/sme2_gemm.cpp PROPERTIES COMPILE_OPTIONS -march=armv8.6-a+sme2)
+set_source_files_properties(kernels/cpu/sme2_conv.cpp kernels/cpu/sme2_gemm.cpp kernels/cpu/f16_sme2.cpp PROPERTIES COMPILE_OPTIONS -march=armv8.6-a+sme2)
 target_link_libraries(lokinfer_runtime PUBLIC lokinfer_compiler metal_cpp "-framework Accelerate" "-framework MetalPerformanceShaders")
 target_compile_options(lokinfer_runtime PRIVATE ${LOKI_CORE_FLAGS})
 target_compile_definitions(lokinfer_runtime PRIVATE LOKINFER_DEFAULT_METALLIB="${LOKINFER_METALLIB}")

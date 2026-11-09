@@ -90,8 +90,13 @@ struct Op {
 
 struct Region {
   std::vector<ValueId> args;   // exec: inputs; init: none
+  // exec: 1 = a mutable input (`%kv: buffer<...> mutable`): the caller's buffer, written in place by `inout` kernels
+  // (e.g. a KV cache); never an output, bound without a copy. Empty = no mutable inputs; else one entry per arg.
+  std::vector<uint8_t> mutableArgs;
   std::vector<ValueId> state;  // exec only: values produced by init's return, positionally
   std::vector<Op> ops;         // last op is a Return
+
+  bool isMutableArg(size_t i) const { return i < mutableArgs.size() && mutableArgs[i]; }
 };
 
 struct ConstantData {

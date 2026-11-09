@@ -128,7 +128,11 @@ class Graph:
         self.lines.append(f"dim.read %{value.name}[{index}] -> {symbol}")
 
     def to_text(self, outputs: list[Value]) -> str:
-        args = ", ".join(f"%{a.name}: {a.type.ir()}" for a in self.args)
+        from .types import BufferType
+
+        # buffer-typed inputs are mutable inputs (written in place by inout kernels; the verifier checks the rules)
+        args = ", ".join(f"%{a.name}: {a.type.ir()}" + (" mutable" if isinstance(a.type, BufferType) else "")
+                         for a in self.args)
         body = "\n".join("    " + l for l in self.lines)
         ret = ", ".join(f"%{o.name}" for o in outputs)
         types = [o.type.ir() for o in outputs]  # result types in the header, MLIR style (the parser checks them)

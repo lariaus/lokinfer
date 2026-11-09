@@ -40,8 +40,13 @@ class ScalarType:
 
 @dataclass(frozen=True, init=False)
 class BufferType(TensorType):
-    """A raw buffer in the traced graph: only `lk.persistent_buffer` makes one (model-lifetime state written in
-    place by `inout` kernels). Kernel type rules accept it wherever a tensor of the same dtype/shape is accepted."""
+    """A raw buffer in the traced graph: memory written in place by `inout` kernels. Made by `lk.persistent_buffer`
+    (model-lifetime state) or given as an input type (`lk.MutableType`, the same class): a **mutable input**, the
+    caller's buffer (e.g. a KV cache) written in place, never an output, bound without a copy (IR
+    `%x: buffer<...> mutable`). Kernel type rules accept it wherever a tensor of the same dtype/shape is accepted."""
 
     def ir(self) -> str:
         return f"buffer<{self.dtype.name}[{', '.join(str(d) for d in self.shape)}]>"
+
+
+MutableType = BufferType  # input_types=[lk.MutableType(lk.f16, [L, 2, P, D])]: a mutable input

@@ -6,6 +6,7 @@
 //   sin4/cos4 abs 1.2e-7, |x| < 1e4 (f32 Cody-Waite reduction by pi); sinSq4 abs 2.5e-7, |x| < 1e4
 //   sin4Wide  abs 1.2e-7, |x| < 1.6e7 (reduction in double: sin of the exact f32 argument)
 //   tanh4     abs 8.4e-8              atan2_4 abs 2.7e-7 rad
+//   erfc4     rel 6.0e-7, [-6, 9]     geluErf4 rel 5.7e-7 vs the f32-argument erfc (the basic kernels' semantics)
 // (tests/unit/test_sme2_conv.cpp "neon_math", 2026-11-02, M2 Max)
 // LSTM gates keep Accelerate's vvexpf / vvtanhf on purpose: their ulp-level differences move the chaotic F0 path.
 #pragma once
@@ -31,6 +32,35 @@ inline float32x4_t exp4(float32x4_t x) {
   p = vfmaq_f32(vdupq_n_f32(1.f), p, r);
   const int32x4_t e = vshlq_n_s32(vcvtq_s32_f32(n), 23);
   return vreinterpretq_f32_s32(vaddq_s32(vreinterpretq_s32_f32(p), e));
+}
+
+// erfc(x) for 4 lanes, any sign: the Chebyshev fit of Numerical Recipes' erfcc (fractional error < 1.2e-7
+// everywhere; measured with exp4: see the accuracy table above): t = 1 / (1 + |x| / 2),
+// erfc(|x|) = t exp(-x^2 + P(t)); erfc(-|x|) = 2 - erfc(|x|).
+inline float32x4_t erfc4(float32x4_t x) {
+  const float32x4_t z = vabsq_f32(x);
+  const float32x4_t t = vdivq_f32(vdupq_n_f32(1.f), vfmaq_f32(vdupq_n_f32(1.f), z, vdupq_n_f32(0.5f)));
+  float32x4_t p = vdupq_n_f32(0.17087277f);
+  p = vfmaq_f32(vdupq_n_f32(-0.82215223f), p, t);
+  p = vfmaq_f32(vdupq_n_f32(1.48851587f), p, t);
+  p = vfmaq_f32(vdupq_n_f32(-1.13520398f), p, t);
+  p = vfmaq_f32(vdupq_n_f32(0.27886807f), p, t);
+  p = vfmaq_f32(vdupq_n_f32(-0.18628806f), p, t);
+  p = vfmaq_f32(vdupq_n_f32(0.09678418f), p, t);
+  p = vfmaq_f32(vdupq_n_f32(0.37409196f), p, t);
+  p = vfmaq_f32(vdupq_n_f32(1.00002368f), p, t);
+  p = vfmaq_f32(vdupq_n_f32(-1.26551223f), p, t);
+  // exp(-z^2 + P) as exp(-zz) exp(P - e), zz = f32(z z), e = z z - zz exactly (fma): -z^2 + P rounded in f32 would
+  // cost ~6e-8 z^2 of relative error (4e-6 at z = 9)
+  const float32x4_t zz = vmulq_f32(z, z);
+  const float32x4_t e = vfmaq_f32(vnegq_f32(zz), z, z);
+  const float32x4_t r = vmulq_f32(vmulq_f32(t, exp4(vnegq_f32(zz))), exp4(vsubq_f32(p, e)));
+  return vbslq_f32(vcltq_f32(x, vdupq_n_f32(0.f)), vsubq_f32(vdupq_n_f32(2.f), r), r);
+}
+
+// gelu_erf(x) = 0.5 x erfc(-x / sqrt(2)) (accurate in the negative tail, no 1 + erf cancellation).
+inline float32x4_t geluErf4(float32x4_t x) {
+  return vmulq_f32(vmulq_f32(vdupq_n_f32(0.5f), x), erfc4(vmulq_f32(x, vdupq_n_f32(-0.70710678118654752f))));
 }
 
 // gelu_tanh(x) = 0.5 x (1 + tanh(u)) = x / (1 + exp(-2u)), u = sqrt(2/pi) (x + 0.044715 x^3).

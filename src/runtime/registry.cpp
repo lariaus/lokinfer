@@ -18,11 +18,14 @@ void registerCpuKokoroNormKernels();
 void registerCpuKokoroSignalKernels();
 void registerCpuVisionKernels();
 void registerCpuDecodeKernels();
+void registerCpuF16BasicKernels();
+void registerCpuF16FusedKernels();
 void registerGpuKernels();
 void registerGpuKokoroKernels();
 void registerGpuMpsKernels();
 void registerGpuTransformerKernels();
 void registerGpuWinogradKernels();
+void registerGpuF16Kernels();
 
 namespace {
 
@@ -48,11 +51,14 @@ void registerBuiltinKernels() {
     registerCpuKokoroSignalKernels();
     registerCpuVisionKernels();
     registerCpuDecodeKernels();
+    registerCpuF16BasicKernels();
+    registerCpuF16FusedKernels();
     registerGpuKernels();
     registerGpuKokoroKernels();
     registerGpuMpsKernels();
     registerGpuTransformerKernels();
     registerGpuWinogradKernels();
+    registerGpuF16Kernels();
   });
 }
 

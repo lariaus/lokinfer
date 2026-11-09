@@ -10,6 +10,8 @@
 
 #include <cstddef>
 #include <atomic>
+#include <functional>
+#include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <memory>
@@ -35,6 +37,7 @@ class CommandQueue;
 class CommandAllocator;
 class CommandBuffer;
 class CommitOptions;
+class CommitFeedback;
 class ComputeCommandEncoder;
 class ArgumentTable;
 }  // namespace MTL4
@@ -110,6 +113,11 @@ class GpuContext {
   // Ends the segment, commits and waits for completion of everything committed (no-op if nothing encoded or
   // in flight).
   void commitAndWait();
+  // commitAndWait, then commits pending residency-set removals now. The set keeps every allocation it holds alive
+  // until it is committed, and it was only committed at the next encode: a freed model's weights (3.6 GB for
+  // Qwen3-ASR) stayed allocated until the next GPU call (2026-11-06; on the iPhone, through a following CPU-only
+  // session). Call after freeing big buffers outside a run.
+  void trim();
   // The context is one shared encoder: every thread that encodes, commits or waits holds this (recursive: kernels
   // commit inside a run). Executable::run holds it for the whole call; the entry points below lock it themselves.
   std::recursive_mutex& mutex() { return mu_; }
@@ -117,6 +125,11 @@ class GpuContext {
   // segment is in flight: the next segment's first dispatch (or commitAndWait) waits for it, then releases
   // its deferred buffers / objects.
   void commitAsync();
+  // Estimated GPU work (FLOPs) a kernel just encoded. With a work budget (iOS), the open command buffer is committed
+  // once the work encoded into it passes the budget: iOS aborts a command buffer that runs too long ("GPU timeout",
+  // MTL4CommandQueueErrorDomain 1), e.g. a 1473-row Qwen3-ASR prefill, ~0.6 s of GPU work per buffer when only the
+  // params ring split them. Decode GEMVs report ~no work: no extra commits.
+  void addWork(double flops);
   bool hasOpenSegment() const { return cmdOpen_; }
   // A committed command buffer failed (GPU fault, timeout, out of memory; reported by Metal's commit feedback):
   // returns the error once and clears it. Waits stop blocking while an error is pending (a failed command buffer
@@ -176,6 +189,8 @@ class GpuContext {
   static Expected<std::unique_ptr<GpuContext>> create();
   void commitResidency();
   void endAndCommit();
+  double workBudget_ = 0;  // FLOPs per command buffer (0 = no budget); see addWork
+  double workEncoded_ = 0;
   void waitInflight();
   void waitEvent(uint64_t value);
 
@@ -225,9 +240,25 @@ class GpuContext {
   size_t nextSlot_ = 0;
   size_t lastSlot_ = 0;  // slot of the most recent segment (reused while nothing is in flight)
   bool queueBarrier_ = false;
-  MTL4::CommitOptions* commitOptions_ = nullptr;  // carries the feedback handler below
+  std::function<void(MTL4::CommitFeedback*)> onFeedback_;  // attached to every commit's options (endAndCommit)
   std::atomic<bool> gpuFailed_{false};
   std::mutex gpuErrorMu_;
+  // Commit feedback arrives on Metal's thread, possibly after the event signal a wait returned on: commitAndWait waits
+  // until every commit so far has its feedback, so a failure is reported by the call that caused it (never a later
+  // call, never lost). Guarded by gpuErrorMu_.
+  std::atomic<uint64_t> commits_{0};
+  std::atomic<uint64_t> feedbacks_{0};
+  std::condition_variable feedbackCv_;
+  void waitFeedback();
+  // Sentinel: a 1-thread dispatch at the end of every command buffer copies req[slot] to res[slot] (one shared
+  // buffer: 4096 request words, then 4096 result words). After the completion event, res == req for every committed
+  // segment means success with no feedback wait; a missing marker = a failed buffer: wait for its feedback (error).
+  static constexpr uint32_t kSentinelSlots = 4096;
+  MTL::Buffer* sentinel_ = nullptr;
+  MTL::ComputePipelineState* sentinelPso_ = nullptr;
+  std::vector<std::pair<uint32_t, uint32_t>> pendingSentinels_;  // (slot, marker) committed since the last check
+  void encodeSentinel();
+  void checkSentinels();
   std::recursive_mutex mu_;
   std::string gpuError_;
   uint64_t skipUpTo_ = 0;  // events up to this value belong to failed work: never wait for them  // the open segment must wait for the queue's earlier (in-flight) work

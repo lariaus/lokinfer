@@ -1,0 +1,374 @@
+AppDev: lokinfer model inference optimization guide
+
+
+This doc describes ideas / suggestions / possible implementations to improve performance for the qwen speech to text model, but also models in generals.
+Some of these sections are let’s try / implement something, others are more like general guidelines to improve performance overall.
+
+This doc only covers GPU performance optimization (both iPhone / Mac) as they’re the most important, not CPU.
+
+Don’t take this doc too literally, I really ain’t sure of what I’m talking about, and I could be wrong. All must be tested / verified.
+
+Also I suggest a lot not rely only on your own knowledge, but also do online search to understand how things work / get advice on performance and all. Also looking at how repos do stuff or at research papers could help.
+Btw, even if this project is about Apple inference, I think any ideas of optimizations for Nvidia GPUs could also be applied partially (or get inspiration from), so when searching only do search for other GPU too.
+In particular things like vLLM / SGLang / ThinderKittens etc could hold interesting optimizations.
+
+Btw, don’t just apply these optimizations / implement these sections one by one in order. They’re all interconnected, these requires multiple passes, try and implement each side / thing multiple times until really reaching the best performance we can.
+
+Also, I want to mention, this doc is only about optimizing performance, speeding up a benchmark loop of N “iterations” of the forward pass of models. End to End full pipeline optimizations doesn’t apply / shouldn’t be done / mentioned here. Another doc would consider them later. Please refrain from doing this kind of optimization.
+All optimizations should improve performance/ inference without changing the output results (except for the numerical differences of course, this is perfectly fine / normal).
+
+What to do today ? This will be phase 2 of qwen (the actual old phase 2 of qwen which was E2E support moves to phase 3 instead). Read everything and come up with a todo list. An order in which we want to tackle everything in that list at least once (the order that makes more sense).
+After that, just go and implement all of phase 2. Don’t start by writing big design docs before starting phase 2, it wouldn’t really be valuable. Every section is very different, so let’s just do deep search and design docs while doing each section one by one, not beforehand.
+Once this list of tasks would be completed, there might be more things worth checking. Review everything that was done, think of everything that could be improved, some other things from all those sections that are worth considering again, and update the todolist with new tasks. Then implement, and we keep going with that iterative process until you think for qwen3 we really squeezed the most performance we can using these specific strategy points mentioned in the doc.
+Also, I suggest writing when necessary/ useful design docs as well as internal specs about these points that help the performance optimization of models, so that in the future you do the job better and more efficiently.
+
+# Optimize pure single-thread Encode time
+
+I think encode time could be improved in general, not sure it would lead to performance, but it would be a nice easy to do thing. 
+The goal is to measure the time it takes to encode one forward pass EndToEnd (single thread, no other encoding trick). Could be tested / benchmarked with different models, aggregate different iterations to get precise results. Focus only on encode time, nothing else.
+
+Possible ideas:
+- simplify as much as possible the code, make it more straightforward. Maybe use less cost things. Avoid too many allocations when possible ?
+- Avoid redoing work between different encode phases. I guess some objects could be saved / reused / not recomputed every time? They could be either computed the first time then cache (I think I prefer that), or each kernel have a “setup” phase called at init model time (this may sound cleaner, but in practice with dynamic shape models we might not know in advance what to setup). Of course there should be some warmup iterations so the cost of building the shared objected shouldn’t influence too much the bench results.
+
+Also look online for possible suggestions / what other project / people do there. Also maybe look at projects like MPS Graph, maybe it’s open source not sure ?
+
+# Consider better encode strategies / multi-threading
+
+I think we tried this before by commiting some kernels early, but it’s very hack and simple, we could do so much better. Commit every N operations or something could be better.
+Also consider using multiple threads here ? (maybe each encode part of the graph).
+
+I have no idea really, these are just ideas. Maybe the graph are so small enough now because of very advanced fusion that it wouldn’t help that much.
+
+Again look online / source / projects / Mpsgraph etc.
+
+# Consider double buffering
+
+I’m not sure if double buffering is the right word, but the idea is, encode iteration N+1 while iteration N is running.
+This must be done obviously in a smart way that doesn’t explode the memory usage.
+I’m also not sure if it’s possible / compatible with the end to end LLM models.
+
+Besides, I’m also wary of using that for benchmarking, it kind of feels like cheating, comparing Apple to oranges if the other frameworks we compare to don’t do the same.
+
+Maybe it doesn’t really belong to that doc in the end, and should be more applied for E2E optimizations concerning the whole LLM pipeline instead. But nice to keep in mind.
+What do you think ?
+
+# Experiment more with Apple replay
+
+I know we tried it before, the replay of command buffers or something (the equivalent of CUda graph), and it lead to worst performance, but I find it hard to believe. 
+I still find we’ve been doing it wrong or something else was off.
+Spend a lot more time investigating that, search online, look at other projects, search for people running into the same issues than you. Go to the end of that story and do your best to really resolve all that.
+
+Also I remember the replay feature was really complex to use on CUDA for dynamic shape LLMs, people used to do things like “bucketing the model” then building N graphs during setup. updating graph memory pointers, or having double pointer references to change the inputs. No idea if you would need that here too, but take all of that into account.
+
+All this graph setup / creating and all should be done at model setup time, not exec, and in a way that doesn’t explode the memory either.
+
+# Support optimized multi graph
+
+For now, every model is an init graph and an exec graph. 
+Instead let’s support graph with multiple entry-points (multiple exec phase). 
+A common use case for this is when you have different compiles graphs you want to run for one model (eg diffuser and LLM).
+Another interesting use case would be to have one graph for decode, one for refill. I don’t know if it would help that much since you seem to run different kernels already with prefill vs decode thanks to runtime if / else based on shapes, but maybe you could do more with that.
+
+The way it should be done, there is a single init phase, but multiple exec (entry points). This way multiple entries points should share weights (or anything else).
+This must be done in a way that doesn’t explode memory size of course. 
+Memory planning should be very smart about it.
+You can assume 2 execs won’t run ever in parallel, so memory planning must be able to shape buffers / allocation between multiple graph to minimize the total allocated size.
+
+I mentioned prefill / decode graph split, but it was just an idea, maybe even better things / different graph splits could be done to improve performance.
+
+Start by implementing the feature with basic unit and end to end tests, then use it to try and optimize models.
+
+# Make compiler aware of scratchpad data
+
+Right now in the graph compiler, we can see the output tensors of every kernel (op). But maybe some kernels need some temporary allocation (like a scratchpad / workspace buffer) need only for the computation.
+This should be visible also to the compiler, the kernel should take some scratchpad buffers / tensor object, with a specific shape each (static or dynamic / parametric). 
+
+This way memory planning could take that into account and already prepare the memory for them beforehand. 
+
+The goal really is to try and get rid of all (or most) allocations happening inside kernels themselves. 
+
+I’m not sure if this feature is really needed today, maybe we already don’t have any allocations / avoid scratchpad buffers, but I think it’s always a nice to have / might be more useful in the future.
+
+Start by implementing the feature with basic unit and end to end tests, then use it to try and optimize models.
+
+# Optimize memory planning / copy avoidance 
+
+For qwen model (or any other model really), it’s worth investigating the memory planning / allocator, where copies are happening, and see if nothing could be improved it.
+
+The idea is, you know the model very well, let’s suppose you could manually do everything to allocate memory and call kernel / pass buffers around, instead of using the compiler to do it automatically for you.
+1. Do those computations by hand for this model
+2. Compare with the allocated memory by planner and / or at runtime when running qwen model. Is there too much allocated memory ? If yes where ? Why ? And how to fix it. Then fix it.
+3. Similarly compare where we do extra copies and use extra buffers we don’t need. Where ? Why ? And how to fix it ? Then fix it.
+
+# Use more optimal KV Cache
+
+We started with the PyTorch model definition, that has standard tensors and tensor operations.
+
+The KVCache is a different beast altogether. Technically it’s a buffer, but it could be manipulated in very different ways, data could also have a completely different layout, etc.
+We could have special custom kernel to manipulate kv cache / etc for even best performance, that are aware of these optimizations.
+
+Consider things like Paged KVCache or others ? Would it help ? Also does it still enter in the category of no E2E pipeline optimization, just forward pass optimization ? As long as it doesn’t change the final results really it’s fine.
+You might be comparing the KVcache with the reference data. I’m still not convinced if it’s smart or not. It definitely helps cache bugs, but might make it harder to catch those bugs. Anyway Kv should have the same data I guess ? Doesn’t matter if layout is different. And even that, the most important think is that the model output is the same, the KV cache is slightly less important.
+I trust your best judgment to have the best of both best performance and easy corectness testing.
+
+Search deeply online for this part. Look at how KVCache is implemented for other projects / frameworks / models etc. Apple is important, but don’t just focus on this, other Nvidia focused might have good idea that applies here too. Also maybe some research papers might have some good ideas too.
+
+# Consider Fusing the MLP block
+
+I don’t even know if this applies to qwen, if not ignore for now, but the MLP block is a bit tricky. 
+We have 3 matmul, technically we can fuse 2 of them by concatenation of their weights, but then the activation kernel have to run standalone. (So we still have 3 kernels).
+
+A solution is to run both matmul + activation at once (I think it’s called a a double gemm kernel or something). So this way we have 3 kernel total instead of 2.
+It’s worth investigating to see if it improves perf too.
+
+Actually, something even crazier you could even do is also fusing the 3rd matmul too, having 1 single kernel. I have no idea if it’s a good idea at all. But who knows. It might work well only for specific shapes / types.
+
+Again things might differ between prefill / decode here.
+
+Look a lot online what other frameworks / projects / kernel do, especially as you fuse more, you might have to be very clever to get performant kernels. Also benchmark / profile/ test / optimize things a lot to discover the best solutions.
+
+# Consider fusing more the attention
+
+I’m not 100% sure, I might be wrong, it might also be very model / shape / style dependant, but I remember things being fused a lot between KV cache update / rope / masking / attention etc.
+Actually, I wonder if for some models, rope + update + masking + attention wasn’t all fused in a single kernel (thought again could be wrong here).
+
+It relates a lot to “use more optimized KVCache” section above. The KVCache layout / custom kernels etc must be taken into account to fuse as aggressively as possible and get the best performance possible
+
+Benchmark a lot, experiment, profile, I think we should optimize a lot..
+
+Search deeply online for this part. Look at how attention / KVCache is implemented for other projects / frameworks / models etc. Apple is important, but don’t just focus on this, other Nvidia focused might have good idea that applies here too. Also maybe some research papers might have some good ideas too.
+
+# Fuse a lot more kernels
+
+I already touched on this on the sections above, but I’m thinking there could be some missed fusion opportunities there. 
+Some could just be where you look at the kernels, and see that they are some kernels that could naturally and easily fuse together that are one after the other. 
+Others are more tricky and are “know fused kernels”, like the MLP fusion blocks I mentioned above.
+
+Also, more fusion doesn’t always lead to better performance. 
+
+Investigate / benchmark / profile etc to try and optimize the hell out of qwen.
+
+Also, look a lot online for this, what other projects / frameworks do, not just for metal but also Nvidia and all you could get good advices.
+
+
+# Support buffer padding / forced alignment 
+
+I think buffer are always packed ? Or there are only the minimal guarantees about pointer alignment ?
+Instead we should support the allocation of padded buffer, or aligned buffer, things like that buffer that be padded by X or have a row stride dividable by X, or it should have a minimum alignment of X.
+
+I’m not sure how to do that ? Maybe this should be specified at the Graph API level, like when creating tensors we specify those requirements.
+Or maybe it’s at the op level. Some kernels have specific requirements for some of their inputs and / or outputs.
+I don’t know, I trust your best judgment on this.
+
+I’m thinking maybe forcing padding and / or alignment should improve kernel performance in some situations.
+
+Again, I’m not an expert on this. Use your own knowledge, but also look at what other frameworks are doing to do the best thing.
+And optimize, profile, experiment etc.
+
+Start adding support for this feature with small unit tests as well as E2E tests, then try it on real models to see if it really improves performance.
+
+# Weight Packing
+
+I think we’re already partially doing this already, but many times it would be possible to optimize performance by packing the weights differently / changing the data layout for better performance.
+This could be something as simple as a transpose, or more complex schemes where the weight data is completely reordered for better locality and performance.
+
+Do lots of research to learn more about these weights packing techniques, not just on Apple GPUs, but other GPUs too, look at what other frameworks are doing, inspire yourself, test, experiment, and see if you can improve performance.
+
+Btw, all the weight packing operations should be moved to init always for maximum performance.
+
+# Lossless weight compression
+
+Something worth exploring, would it be possible to improve performance thanks to lossless weight compression (no quantization). 
+I really know nothing about this, but it may be worth experimenting with it and see if it helps or not.
+
+Do lots of research to learn more about this technique, see if they are examples / guides online, if others frameworks / libraries are using them, and how. Experiment and see if it improves performance or not.
+
+Start adding support for this feature with small unit tests as well as E2E tests, then try it on real models to see if it really improves performance.
+
+# Concurrent kernel dispatch 
+
+With one command buffer, only place memory barriers where real dependency exists. 
+These way some small ops / independent GPU ops that don’t fill the GPU could overlap.
+I suppose we have all the informations in the IR / compiler to be able to manage that ?
+I know very little about this, so I have no idea if it would help or not, but it’s worth experimenting.
+
+Start adding support for this feature with small unit tests as well as E2E tests, then try it on real models to see if it really improves performance.
+
+# Parametrized compile / runtjme
+
+Some of the optimizations I mentioned in that doc are in the runtime / compiler / memory planning itself etc. and some are very model dependent (eg when to use replay ? Multi-thread encoding, etc). It would be very hard to come up with one solution that works best for all models.
+
+Instead all of these settings should be controlled with some runtime options. We should have a clean API / struct to pass these options, through the Python and / or C++ API, and / or with a config file.
+We would have different config for each model / device, used for benchmark E2E models, use models with native API (eg from English-practice).
+So each model on each device would run with the best possible configuration and performance.
+
+# Have better tooling around profiling
+
+I’ve mentioned this before, but I think the tools we have around profiling are not good enough. The approach of having one tool that gives us lots on information about the whole model executing is great, I love it, it helps debugging / optimizing, lets keep in that direction.
+
+But we need more profiling tools, in general, we need some equivalent of:
+
+- PTX / SASS: from what I understand there really isn’t. Could we use Adobe AIR ? Is it any useful ?
+- Nsys system: I think we have it kind of already with our tool, but maybe there is something even better ?
+- Nsys compute: would be nice to have some equivalent for kernel optimization / performance
+- NCU: same here it would be nice to have some equivalent.
+- Speed of light analysis: Can we do this ?
+
+From what I understand we have perf counters and all already, but I don’t know if it’s enough. How about infos about register, occupancy, memory vs compute bound, etc ?
+
+Actually, I’m not very knowledgeable about kernel performance optimization. The idea is:
+1. List all tools / metrics / analysis etc that are valuable for Nvidia or other GPU programming (besides the one I listed)
+2. Find the equivalent (or similar) when possible for Apple GPU programming 
+
+This is extremely important, maybe the most important section of this whole doc. Lots of sections refers to have more efficient kernels, and to be able to profile and optimize kernels to reach peak performance, and to do it quickly, we need these kind of tools and metrics at our disposal.
+Also don’t forget the importance of being able to combine the outputs / metrics / signal of all these tools into one meaningful report the agent can use to optimize kernels.
+
+Do a lot of research here, try to find all the information you can about GPU profiling and specifically Apple GPU programming, both on Mac and Apple. Really go deep, scrap the web, they’re might be blog posts, articles, also specifically from Apple, explaining how to profile and optimize their kernels.
+
+# Faster development time
+
+I asked you to have logs tracking all the development / testing process with timings.
+The reason is, I think you spend too much time / effort testing and / or benchmarking things.
+In theory make sense, a small change impact many things, and we should retest it all. In practice, you put too much effort.
+
+I don’t really know what to do to improve things here, just given the logs, and thinking through things more, have better strategies that allow faster development / iteration, less testing / benchmarking things, without losing correctness / performance in the end.
+
+Anyway here are a few tricks that could help:
+1. You need different level of correctness testing / benchmarking, in general but also for each ongoing milestone: from super small to small to medium to large to very large. Small changes requires small tests, run the larger tests less often or even only at the end.
+2. The thing to wait for the iPhone to get colder is a craziness. How much time have we lost doing nothing because of that ? You need to do better, multitask, or work on other things / run stuff in parallel on Mac.
+3. Mac testing is easier, faster, and give more results (especially profiling). I think we should always spend more effort / do Mac first, and iPhone second, when possible.
+4. Some models / large test / benchmark are almost useless to run. I’m thinking about the E2E bench / correctness for all models. Usually we always focus on optimizing one model by project. All other models shouldn’t be run E2E, unless at the very end before committing, to make sure there isn’t regressions (if there is we compare with before / investigate now to know what changed).
+
+This isn’t all, just some ideas. Come up yourself with the best strategies to make things faster.
+
+# Put less effort on CPU
+
+Related to “faster development time” section, the CPU is always lower priority. It’s about implementing native / basic ops first to make sure they work, are correct, and to make sure we understand the model.
+Then we start fusing kernels to realize / understand what can be fused. 
+Then we can optimize things a bit, but usually it’s not needed to put too much effort on it.
+Also, I wouldn’t expect much difference (but a bit for perf) between Mac and Apple CPU. So all efforts should go on the Mac CPU, and Apple CPU second.
+
+Anyway, again these are just ideas / guidelines. You have the logs / infos about CPU development, maybe you can come up with even better ideas to speed it up even more.
+
+# Put less effort on iPhone
+
+The iPhone is very important, but it’s also a lot harder to optimize and require more time.
+For this I think it’s really worth it to always put all the effort on Mac first to optimize the model / new features / fused kernels as much as possible. 
+Then after this work on iPhone optimization.
+I don’t really know how really, but I hope all the heavy lifting could be done on Mac first, and then iPhone would just require some more careful fine tuning, even though I realize this is not always possible.
+
+Also, you assumed iPhone was always available (or most of the time), unfortunately I use it a lot for other projects, so treat it as a scarcely available resource, I’ll tell you when I grant you or don’t grant you access to it (but many times you won’t, except at night time for example).
+
+Anyway, again these are just ideas / guidelines. You have the logs / infos about iPhone development, maybe you can come up with even better ideas to speed it up even more.
+
+# A word about MegaKernels
+
+MegaKernels are cool. They are very useful. Theylll be a point in the future where I would want to really support and optimize them to reach peak performance. But it’s not the case today yet.
+So I would suggest you to not go crazy / invest any effort on them.
+I would even say “avoid them for now”, but actually no, you might already use some “small MegaKernels” already, and it’s fine. (For example maybe some advanced very heavily fused attention kernels could also be considered a MegaKernel. Or Also the entirely fused MLB block could be also considered a MegaKernel. These small ones are fine for now).
+
+Don’t start implement a full model (or even just a full transformer block), into a MegaKernel yet, we’re not there yet, later we’ll do.
+
+# General runtime optimization 
+
+This doesn’t just apply to qwen, the question is in general how we can optimize the runtime to get better performance on a specific model.
+
+This consider things like:
+- Would there be more efficient ways to encode things / commit early / use multithreaded encoding ?
+- Could we use replay somehow for faster encoding ?
+- Is the runtime doing extra work that is not needed for some reason?
+- Is the runtime using extra resources than what’s needed ? (Besides memory)
+
+To answer these questions, you could imagine, what if you were writing this model entirely by hand, you could have some sort of mental model of what’s needed / how slow / fast things should be. And you should be able to know where exactly the runtime is falling short of your expectations, and how to fix it.
+
+It also helps profiling to see if the runtime is the bottleneck and / or where it’s spending a lot more time than it should.
+
+# General graph break avoidance / dynamic shape optimization
+
+Graph breaks are terrible, they happens when we can’t encode all the model at once, and we need to execute some code on CPU, having to stop and sync.
+It could be for multiple reasons:
+1. some ops aren’t supported on GPU or run faster on CPU.
+2. Some ops have dynamic / data dependent shapes and we can’t allocate some buffers / execute them without a graph break
+
+Usually 1 is rare but can’t really be avoided.
+But 2 is the biggest problem.
+
+Think about it, if you were writing the whole forward pass manually without the compiler / runtime, being fully flexible, would you be able to get rid of some (or all) of these graph breaks ? If yes, that means the compiler, runtime, model must be updated somehow to fix it and get the same results.
+
+Some ideas:
+- There is always a graph break already: between each forward pass. Maybe some of the CPU code could be moved to run at the beginning or end of the forward pass instead.
+- The graph could potentially be rewritten to get rid of these CPU ops / break or move them to a better place. 
+- The parametric dimension system could be extended to support more operations, and / or maybe the graph could be updated to turn data-dependent shapes into smarter parametric ones.
+- Maybe more kernel fusion or smarter buffer allocation could help somehow sometimes ?
+
+These are just ideas ideas, but I believe if manually you could write the model without these graph breaks, you should find a way to do the same with lokinfer, whatever that is.
+
+# General init time optimization
+
+Look at the IR and investigate, are there any ops that should run during model setup (init graph) but are still in exec ? 
+If yes, investigate why they are not moved and fix it.
+Maybe also in some cases the graph could be rewritten also to move even more ops to init (this is not always possible / straightforward, and should only be done when it really does improve performance in the end).
+Eg: you could run the broadcast of a constant in init, but almost always you wouldn’t want to do so, since this broadcast is fused with other things, and materializing the full tensor would give worst performance.
+
+# General memory usage optimization
+
+This doesn’t just apply to qwen, the question is in general how we can optimize the model / memory planner / runtime to use less memory, and to avoid extra unneeded copies.
+
+Overall the memory planner is pretty straightforward about this, so maybe it should be fixing some bugs or improving the algorithm to make it behave better and save more memory.
+
+Maybe I think here having tools to keep track of the memory used by the allocator / runtime and all would be very important.
+
+We also need to answer questions like:
+Are we allocating more memory than needed ?
+Do we have a memory fragmentation issue ? How to fix it ?
+Can we avoid some I/O buffer copies by rewriting the graph in a more efficient way ?
+Are they any kernels doing any extra allocation ? Why ? Can we remove them ? If theory the memory planner only should allocate everything, either at init or exec time.
+
+To answer these questions, you could imagine, what if you were writing this model entirely by hand, you could have some sort of mental model of what memory is exactly needed. And you should be able to know where exactly the runtime is falling short of your expectations, and how to fix it.
+
+# General kernel fusion optimization
+
+This doesn’t just apply to qwen, the question is in general how we can optimize the model to have even less kernel launches and improve performance.
+Btw: remember less kernel doesn’t always lead to better performance.
+
+I’m not an expert at this, but here are a couple of ideas:
+1. Looking at the IR, maybe you could see some obvious choices were either a kernel could be output fused into the previous kernel, or input fused into the next kernel (or both), to improve performance.
+2. Looking at the IR, maybe you could see some obvious choices where some independent kernels have some shared input buffers, and you could manually horizontally fuse them to improve performance.
+3. Many times fusion require some tricks to either rewrite the model slightly differently to make it easier to fuse, or use some more advanced bigger kernels that can efficiently do all ops fused at once.
+
+This is not trivial, many times you wouldn’t be able to come up with solutions just looking at the model definition and / or IR.
+I recommend strongly to do some search here, look at how a specific model is implemented in other platforms / frameworks (doesn’t have to be Apple HW). You need be able to extract somehow the fused IR / fused kernels list from those so that you can compare.
+This way you can imitate their fusion choices / fused kernels, and see if it improves performance or not. 
+
+# General I/O kernels static spec optimization
+
+One problem I used to have a lot with fused kernels, is that to generate efficient code, we need to know the static shape / strides / alignment of the buffers to be able to generate simpler index computations but also to always vectorize load / store when possible. 
+This was mostly a problem because kernels were automatically fused by a compiler.
+
+I have no idea if the same issue could arise with manually fused kernels.
+
+But in general, when investigating / optimizing the performance of fused kernels, especially when it involves fused view operations like transpose, reshape, broadcast, slice etc, we need to make sure all of this is optimal:
+- Are they some scalar load / store where we could use vector (or larger vector size) operations instead ?
+- Is the index computation optimal ? Tensor are N-D but it’s all linear. Maybe we could flatten index computation more / entirely, factor out some index computation ? Also divide / mod are terrible and should be replaced with binary operations as much as possible.
+
+This requires lots of profiling anyway to figure out and fix those issues.
+
+# General kernel performance optimization
+
+This doesn’t just apply to qwen, the question is in general how we can profile / optimize / fine tune some kernels on some specific shapes to get the best possible performance for that kernel.
+
+Again I’m really not an expert for this, but here are some suggestions I can give you:
+- Really optimize a kernel when it’s really gonna help the performance E2E. It’s a mix of how much of the total % exec time this kernel corresponds to, and how much improvement you think you can get. It’s not worth optimizing a kernel taking 0.01% of total exec time, even if you make it 100 times faster. Also a kernel taking 1% but that could only again 5% perf max isn’t going to help that much either (these are just random numbers, don’t take them as rules).
+- Optimize the kernel first on the most relevant / important shapes. Having E2E testing and / or real life input / usage would help you get those actual real shapes.
+- Have a great way to infer the max theoretical  (or even real) performance of a kernel. This way you could directly know how far you are, and if it’s even worth optimizing it or not.
+- Beside the previous point, if you can have actual reference fully optimized kernels for this kernel, then you can you know for sure that if they can make it that fast, so can you (or even faster).
+- It’s even better if you can have the source code of these kernels. It would give you a lot more information as well as trick / strategies to optimize your kernel and learn / reproduce them.
+- In general, having multiple libraries of available highly optimized ML kernels for Apple GPUs would help a lot. Even if these aren’t the same kernels, looking at them / profiling them could help you learn and understand new strategies to optimize your own kernels.
+- Also for better performance don’t hesitate to have different kernels for different shapes / devices. We already usually have some different kernels sometimes for prefill vs decode, but we can also split more depending on the shapes in general and run different kernels. Also thanks to finetuning kernels should also have different parameters depending on the shape too. This ensures we can optimize kernels independently for different shapes / dtypes.
+- Also, as much as possible, when beneficial, use parametric / compile time / templated values, unrolled loops, etc. This might require some big dynamic if / else that calls the static templated kernels, and might make compile time slower, but if in the end it gives a big performance improvement it’s worth it.
+- Play with the shader compiler flag options / math modes, function constants vs templates, etc. this might sometimes lead to some performance improvements too for some kernels.
+- Have a strong, flexible and efficient auto-tuning infrastructure to search and find automatically the best kernel parameters per shape / device.
+- Finally, I suggest having some list of strategies and / or some recipes you can use for profiling / experimenting / finetuning kernels in general, to know exactly what to look for and to do it better and more efficiently.
+
+Again, I repeat I’m not the expert on that, use your own judgment, and find all available source code and resources you can online that help you write the most possible optimized kernels.

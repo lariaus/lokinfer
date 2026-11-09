@@ -39,3 +39,4 @@ from .winograd import (  # noqa: F401
 )
 from .view import dim_read, flatten, reshape  # noqa: F401
 from .device import to_cpu, to_gpu  # noqa: F401
+from . import f16, f16_gpu  # noqa: F401,E402  (Qwen3-ASR f16 ops: lk.ops.f16.<name>, lk.ops.f16_gpu.<name>)

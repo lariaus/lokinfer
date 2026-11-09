@@ -1,0 +1,16 @@
+// RUN: lokinfer-opt %s | filecheck %s
+
+// A mutable input (the caller's buffer, e.g. a KV cache) written in place by an inout kernel; the `mutable` marker
+// survives a print / parse round trip.
+// CHECK: exec(%kc: buffer<f32[P, 4]> mutable, %vc: buffer<f32[P, 4]> mutable, %q: tensor<f32[1, 12]>, %p: tensor<i64[1]>)
+// CHECK: kernel "kv_write_rows_f32_cpu"(%kc, %vc, %q, %p) {inout = [0, 1]}
+model {
+  init {
+    return
+  }
+  exec(%kc: buffer<f32[P, 4]> mutable, %vc: buffer<f32[P, 4]> mutable, %q: tensor<f32[1, 12]>, %p: tensor<i64[1]>) -> tensor<f32[1, 12]> {
+    kernel "kv_write_rows_f32_cpu"(%kc, %vc, %q, %p) {inout = [0, 1]}
+    %o = kernel "add_f32_cpu"(%q, %q) : tensor<f32[1, 12]>
+    return %o
+  }
+}

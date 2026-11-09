@@ -10,6 +10,12 @@ set -e
 cd "$(dirname "$0")/.."
 # While this flag exists the phone is unavailable: nothing may touch it.
 if [ -e /tmp/lokinfer-phone-disabled ]; then echo "iPhone disabled ($(cat /tmp/lokinfer-phone-disabled)); not deploying" >&2; exit 3; fi
+# A deploy relaunches LokiHost (--terminate-existing kills whatever app is running on the phone): it must hold the
+# phone lock like every other iPhone session. Re-run under it unless the caller already holds it
+# (LOKINFER_PHONE_LOCK_HELD=1, e.g. `lk-lock /tmp/lokinfer-phone.lock env LOKINFER_PHONE_LOCK_HELD=1 scripts/ios_deploy.sh`).
+if [ -z "$LOKINFER_PHONE_LOCK_HELD" ]; then
+  LOKINFER_PHONE_LOCK_HELD=1 exec scripts/lk-lock /tmp/lokinfer-phone.lock "$0" "$@"
+fi
 UDID=$(xcrun devicectl list devices 2>/dev/null | grep physical | grep -v unavailable \
   | grep -oE '[0-9A-F]{8}-[0-9A-F]{16}' | head -1)
 [ -n "$UDID" ] || { echo "no connected physical iPhone" >&2; exit 2; }
@@ -37,6 +43,12 @@ nohup sh -c '
     xcrun devicectl device process launch --device "'"$UDID"'" --console --terminate-existing \
       '"$BUNDLE"' -- $args '"$*"' >> '"$LOG"' 2>&1
     if grep -q "could not be, unlocked" '"$LOG"'; then echo "WATCHDOG: phone locked, stopping" >> '"$LOG"'; exit 0; fi
+    # The console connection can drop while the app keeps running (CoreDevice "The connection was invalidated",
+    # 2026-11-06): relaunching with --terminate-existing then killed a healthy server mid-test. Relaunch only once
+    # the app is really gone.
+    while xcrun devicectl device info processes --device "'"$UDID"'" 2>/dev/null | grep -q "LokiHost.app/LokiHost"; do
+      sleep 5
+    done
     echo "WATCHDOG: app exited, relaunching" >> '"$LOG"'
     sleep 1
   done' lokinfer-ios-watchdog > /dev/null 2>&1 &

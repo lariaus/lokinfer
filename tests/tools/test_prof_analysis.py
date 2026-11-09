@@ -179,6 +179,8 @@ def test_empty_profile_rejected():
 def test_flops_of_matmul_like_kernels():
     from lokinfer.prof.analysis import flops_of
     assert flops_of("gemm_bias_f32_gpu", "f32[4,8] f32[8,16] f32[16] -> f32[4,16]") == 2 * 4 * 8 * 16
+    # rmsnorm_gemm*(x, g, w): the weight is the 3rd input
+    assert flops_of("rmsnorm_gemm_opt_f16_gpu", "f16[4,8] f16[8] f16[8,16] -> f16[4,16] f16[4,8]") == 2 * 4 * 8 * 16
     assert flops_of("conv1d_lc_f32_gpu", "f32[100,64] f32[32,7,64] f32[32] -> f32[100,32] {1,3,1}") == 2 * 100 * 32 * 7 * 64
     assert flops_of("conv2d_nhwc_relu_f32_gpu", "f32[2,8,8,16] f32[32,3,3,16] f32[32] -> f32[2,8,8,32] {1,1}") == \
         2 * 2 * 8 * 8 * 32 * 3 * 3 * 16

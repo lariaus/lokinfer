@@ -19,13 +19,12 @@ endif()
 
 function(loki_add_metallib target)
   cmake_parse_arguments(A "" "OUTPUT" "SOURCES;INCLUDE_DIRS" ${ARGN})
-  # -O0 only for a single-config Debug build: a $<CONFIG> genex here breaks the Xcode generator (one output, a
-  # different command per configuration), e.g. when lokinfer is a dependency of an Xcode app.
-  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(opt -O0)
-  else()
-    set(opt -O3)
-  endif()
+  # Always -O3, Debug builds included (2026-11-06): at -O0 the steel f16 GEMMs (lk_f16o_gemm_swiglu_64x64) fail
+  # pipeline creation with "Compute function exceeds available stack space", so a Debug build (build/lokinfer-serve,
+  # the dev tests' server) could not run Qwen3-ASR on the GPU. Shader debugging keeps working through
+  # LOKI_METAL_DEBUG_INFO (source lines). Override with LOKI_METAL_OPT (e.g. -O0) for a one-off shader debug session.
+  set(LOKI_METAL_OPT "-O3" CACHE STRING "Metal shader optimization level")
+  set(opt ${LOKI_METAL_OPT})
   set(flags -std=${LOKI_METAL_STD} ${LOKI_METAL_MINVER} -Wall ${opt})
   if(LOKI_METAL_DEBUG_INFO)
     list(APPEND flags -frecord-sources -gline-tables-only)

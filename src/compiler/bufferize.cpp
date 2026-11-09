@@ -10,6 +10,7 @@
 //    that isn't returned. Returned exec allocs get `{output = true}`.
 // `buffer.alloc {persistent}` (model-lifetime state such as a KV cache, written in place by `inout` kernels) gets
 // no free and is never reused in place, so plan-memory leaves it alone and hoist-init turns it into init state.
+// Returning persistent state from exec is an error (it can't also be a caller-owned output).
 #include <algorithm>
 #include <vector>
 
@@ -131,6 +132,13 @@ Status bufferizeRegion(Model& m, Region& r, bool isExec, const std::vector<uint8
   std::vector<size_t> last = lastUses(ops, post);
   std::vector<uint8_t> returnedRoots(nv, 0);
   for (ValueId v : ops.back().operands) returnedRoots[post.rootOf(v)] = 1;
+  // Persistent state (a KV cache) can't be a graph output: the output would need its own buffer, and the old code
+  // silently replaced the state by a fresh output alloc (the state lost its contents every call). Return a copy.
+  if (isExec)
+    for (ValueId v : ops.back().operands)
+      if (persistentRoots[post.rootOf(v)])
+        return Status::error("exec returns persistent state %" + std::to_string(v) +
+                             " (or a view of it); persistent buffers can't be graph outputs: return a copy");
 
   // A buffer a GPU kernel touched may still be in use by that (uncommitted)
   // dispatch until the next explicit `sync gpu_to_cpu`: its free (and so its

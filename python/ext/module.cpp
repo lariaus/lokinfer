@@ -358,6 +358,27 @@ void saveModel(const PyModel& m, const std::string& path,
   check(writeModelFile(*copy, path));
 }
 
+// The split transport straight from a model (RemoteDevice.load): (skeleton bytes, [read-only uint8 views of each
+// constant's data]) as a .lkm written by saveModel would split, without writing it (no copy of the weights). The views
+// keep the internalized model copy (and through it the captured tensors) alive.
+nb::tuple lkmSplitModel(const PyModel& m, const std::vector<std::pair<std::string, PyTensor>>& externals) {
+  std::shared_ptr<Model> copy(copyModel(m).release());
+  if (GpuContext* g = GpuContext::existing()) g->commitAndWait();
+  check(internalize(*copy, externalData(externals), /*copy=*/false));
+  auto split = lkmSplit(*copy);
+  check(split.status().isOk() ? Status::ok() : split.status());
+  nb::bytes skeleton(reinterpret_cast<const char*>(split->skeleton.data()), split->skeleton.size());
+  static const uint8_t kEmpty[1] = {0};
+  nb::list views;
+  for (const auto& [p, n] : split->constants) {
+    auto* keep = new std::shared_ptr<Model>(copy);
+    nb::capsule owner(keep, [](void* x) noexcept { delete static_cast<std::shared_ptr<Model>*>(x); });
+    size_t shape[1] = {static_cast<size_t>(n)};
+    views.append(nb::ndarray<nb::numpy, const uint8_t, nb::ndim<1>>(p ? p : kEmpty, 1, shape, owner));
+  }
+  return nb::make_tuple(skeleton, views);
+}
+
 // model.internalize(): a copy of the model whose external constants are internal constants owning a copy of the
 // data (so the model no longer aliases, or needs, the captured tensors).
 PyModel internalizeModel(const PyModel& m, const std::vector<std::pair<std::string, PyTensor>>& externals) {
@@ -452,6 +473,16 @@ NB_MODULE(_lokinfer, mod) {
       .def_prop_ro("num_outputs", [](const PyModel& m) { return m.model->exec.ops.back().operands.size(); });
   mod.def("save_model", &saveModel, nb::arg("model"), nb::arg("path"), nb::arg("externals"));
   mod.def("load_model", &loadModel, nb::arg("path"));
+  mod.def(
+      "lkm_constant_ranges",
+      [](const std::string& path) {
+        auto r = lkmConstantRanges(path);
+        check(r.status().isOk() ? Status::ok() : r.status());
+        return *r;
+      },
+      nb::arg("path"), "(file offset, size) of every constant of a .lkm, in constant order (split transport)");
+  mod.def("lkm_split", &lkmSplitModel, nb::arg("model"), nb::arg("externals"),
+          "(skeleton bytes, [uint8 views of each constant]) of a model's .lkm, without writing it (split transport)");
   mod.def("internalize_model", &internalizeModel, nb::arg("model"), nb::arg("externals"));
   mod.def("bake_init", &bakeInitModel, nb::arg("model"), nb::arg("externals"));
   mod.def("compile_text", &compileText, nb::arg("text"), nb::arg("passes"), nb::arg("internals"));

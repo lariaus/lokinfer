@@ -20,7 +20,7 @@ tools/mlogs-viewer                                     # browse every run (http:
 `tools/prof-torch`. Every tool runs with the repo's `.venv`. Runs go to `prof-runs/` (git-ignored; override with
 `LOKINFER_PROF_DIR`).
 
-Models: `kokoro`, `mnist`, `resnet18`, `mobilenet_v2`, `dcgan_g`, `dcgan_d`, `gpt2`, `gpt2_decode` (one decode step at `-c "decode P=512"`; the cache is not prefilled, which does not change the work) (the benches' builds, cases and
+Models: `kokoro`, `mnist`, `resnet18`, `mobilenet_v2`, `dcgan_g`, `dcgan_d`, `gpt2`, `gpt2_decode` (one decode step at `-c "decode P=512"`; the cache is not prefilled, which does not change the work), `qwen3asr_enc` / `qwen3asr_prefill` / `qwen3asr_decode` (the optimized Qwen3-ASR graphs on the golden inputs: `-c "enc 30s"`, `-c "prefill 300s"` = its first 2048-id chunk, `-c "decode C=4096"` = one step over 4096 keys; the KV cache is allocated on the profiled device; 4 GB of weights: under the big-model lock) (the benches' builds, cases and
 inputs, `python/lokinfer/prof/targets.py`), or a saved `model.lkm` with `--inputs args.npz` (arrays in argument
 order). `-c CASE` picks the input case (Kokoro: `real28`, `real117` (default), `rand510`).
 
@@ -110,8 +110,9 @@ allocated until profiling is switched on.
   wall time; on a mixed graph both run concurrently, so the % column can add up to more than 100.
 - **By shape**: the same, split by signature (`f32[1,512,128] f32[...] -> f32[...] {attrs}`).
 - **TF/s** (Kernels, By shape, and the CLI summary): achieved arithmetic throughput of GEMM / GEMV / conv kernels
-  over their own time, FLOPs = 2 · (output elements / last dim) · (weight elements) (`analysis.flops_of`). Winograd ops
-  (`*wino*`) show no TF/s (their weights are the transformed ones). Compare it
+  over their own time, FLOPs = 2 · (output elements / last dim) · (weight elements) (`analysis.flops_of`; the weight
+  is the 2nd input, except for the fused `rmsnorm_gemm*(x, g, w)` ops, where it is the 3rd: the 2nd is the norm's
+  gains). Winograd ops (`*wino*`) show no TF/s (their weights are the transformed ones). Compare it
   with the device ceiling before optimizing a kernel: f32 steel ≈ 6.3–6.5 TF on the M2 Max, 2.63–2.69 TF on the
   iPhone; Kokoro's convs already reach it on both (2026-11-01), so only fewer FLOPs or fusion can help them.
 - **Instances**: one row per kernel *op* in the exec region. The op number links to its line in the final IR.

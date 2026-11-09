@@ -63,6 +63,10 @@ Wired in today: `bench/models/bench_kokoro.py` (torch eager, torch MPS, lokinfer
 `bench/models/bench_mnist.py` (all its columns) and `bench/models/bench_other_baselines.py` (reference
 baselines for ResNet-18, MobileNetV2, DCGAN G/D, GPT-2 124M: torch CPU/MPS/compile + MLX via
 `bench/models/runners/other_mlx.py`; `--model X` reruns one model). Their own `results_*.json` outputs are unchanged.
+Qwen3-ASR-1.7B, with `--record`: `bench/models/bench_qwen3asr.py` (lokinfer basic / fused, Mac),
+`bench/models/bench_qwen3asr_iphone.py` (lokinfer fused, iPhone, on-device times),
+`bench/models/bench_qwen3asr_baselines.py` (Mac baselines) and `bench/models/record_qwen3asr_iphone_baselines.py`
+(iPhone baseline logs); f16, own verification rules: [baselines.md § 8](baselines.md#8-qwen3-asr-17b-f16).
 Numbers that come from elsewhere (baselines from `docs/impl-notes/`, targets) are recorded by hand with an
 explicit `measured_at` and a `notes` saying where they come from.
 
@@ -103,6 +107,8 @@ explicit `measured_at` and a `notes` saying where they come from.
 - **device**: exactly one of `Mac CPU`, `Mac GPU`, `iPhone CPU`, `iPhone GPU` (M2 Max Mac, iPhone 18 Pro Max).
   CPU and GPU of the same machine are separate charts: compare CPU to CPU and GPU to GPU.
 - **case**: the model's reference input name (`real28`, `real117`, `rand510` for Kokoro) or a shape (`B=64`).
+  Qwen3-ASR-1.7B (shown first, "f16 on every device") uses `<stage> <clip length>`: `enc` / `prefill` / `decode` /
+  `e2e` × `2s` … `300s`, `1200s`, `30min` (the long ones Mac only; definitions in docs/models/qwen3-asr.md).
 - **impl**: frameworks by their usual name (`torch eager`, `torch.compile`, `torch MPS`, `torch.compile MPS`,
   `MLX`, `CoreML`, `ONNX Runtime`). **Any name starting with `lokinfer` is ours** (`lokinfer basic`,
   `lokinfer fused`, `lokinfer GPU`, `lokinfer accelerate`, ...): ours are drawn in greens, after the baselines,

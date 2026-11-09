@@ -216,6 +216,11 @@ TEST_CASE("neon_math: polynomial transcendentals vs double") {
                               maxErr(d::log4, [](double x) { return std::log(x); }, 1e-9f, 0.5f, true));
   const double eLogR = maxErr(d::log4, [](double x) { return std::log(x); }, 2.f, 1e6f, true);
   const double eTanh = maxErr(d::tanh4, [](double x) { return std::tanh(x); }, -12.f, 12.f, false);
+  const double eErfc = maxErr(d::erfc4, [](double x) { return std::erfc(x); }, -6.f, 9.f, true);
+  // vs the basic kernels' f32 semantics: the argument -x / sqrt(2) is rounded to f32 first (f16_basic.cpp geluErf);
+  // that rounding alone moves erfc by ~2 z^2 6e-8 relative in the far tail, for the scalar kernel too
+  const double eGelu = maxErr(d::geluErf4, [](double x) {
+    return 0.5 * x * std::erfc(static_cast<double>(static_cast<float>(x) * -0.70710678118654752f)); }, -12.f, 12.f, true);
   double eAt2 = 0;
   {
     std::uniform_real_distribution<float> u(-3.f, 3.f);
@@ -240,6 +245,9 @@ TEST_CASE("neon_math: polynomial transcendentals vs double") {
   CHECK(eLogR < 3e-7);
   CHECK(eTanh < 3e-7);
   CHECK(eAt2 < 4e-7);
+  std::printf("neon_math max errors: erfc4(rel, [-6, 9]) %.2e geluErf4(rel vs f32-argument erfc, [-12, 12]) %.2e\n", eErfc, eGelu);
+  CHECK(eErfc < 1e-6);
+  CHECK(eGelu < 1e-6);
 }
 
 

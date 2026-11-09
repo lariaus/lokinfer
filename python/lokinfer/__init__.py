@@ -16,7 +16,7 @@ if _metallib.exists():
 
 from .dtypes import DType, f32, f16, bf16, i8, u8, i16, i32, i64, bool_  # noqa: E402
 from .dims import Dim, Sym, ceildiv  # noqa: E402
-from .types import TensorType, ScalarType  # noqa: E402
+from .types import TensorType, ScalarType, MutableType  # noqa: E402
 from .tensor import Tensor, tensor, from_numpy, from_torch, empty, zeros, randn  # noqa: E402
 from .compiler import compile, CompiledModel, Pending, compile_ir, load  # noqa: E402
 from . import ops  # noqa: E402
@@ -37,7 +37,7 @@ def persistent_buffer(dtype, shape, device: str = "cpu"):
 
 __all__ = [
     "DType", "f32", "f16", "bf16", "i8", "u8", "i16", "i32", "i64", "bool_",
-    "Dim", "Sym", "ceildiv", "TensorType", "ScalarType",
+    "Dim", "Sym", "ceildiv", "TensorType", "ScalarType", "MutableType",
     "Tensor", "tensor", "from_numpy", "from_torch", "empty", "zeros", "randn",
     "compile", "compile_ir", "CompiledModel", "Pending", "load", "ops", "dim_read", "persistent_buffer",
 ]

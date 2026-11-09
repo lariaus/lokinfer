@@ -1,273 +1,503 @@
 # lokinfer — TODO
 
-Legend: `[ ]` todo, `[~]` in progress, `[x]` done. **(goal)** = the user's non-negotiable goals from
-`impl-notes/original-plan.txt`. Order of work = the milestones below (M0 → M6), set by
-`impl-notes/plan-review-2026-11-01.md`. A `[x]` means tested, not just written.
+Legend: `[ ]` todo, `[~]` in progress, `[x]` done. A `[x]` means tested, not just written. Finished work is
+summarized; the full item-by-item history of v0.0.1 is in git (tag `v0.0.1`, `docs/todo.md`).
 
-Known state of the code (reviewed 2026-11-01): core stack correct and tested; Kokoro kernels written and
-unit-tested; the Kokoro graph runs and is correct end to end on CPU (M1 done 2026-11-01).
+## Status
 
-## Status: lokinfer v0.0.1 COMPLETE (2026-11-03)
+- **v0.0.1 complete (2026-11-03)**, published at https://github.com/lariaus/lokinfer (tag `v0.0.1`, which includes the
+  dependency-build fix: dev targets skipped when lokinfer is a dependency, Metal `-O0/-O3` chosen at configure time).
+- **Qwen3-ASR-1.7B phase 1 complete (2026-11-07)** — plan `impl-notes/qwen3-asr-port-plan.md` (v3), research
+  `impl-notes/research-qwen3-asr.md`, milestones Q0–Q8 below. lokinfer vs the best baseline (geomean over the
+  dashboard cases): Mac CPU 2.39×, Mac GPU 1.07×, iPhone CPU 2.02×, iPhone GPU 1.14× (docs/models/qwen3-asr.md).
+- **Next: speech-to-text in lokinfer** (designed, not started; the user starts it) — section below.
 
-Step 1 of english-practice's TTS transition is done: remaining non-perf items closed, no regression (full suites on Mac
-+ iPhone, Kokoro / GPT-2 #1 in every dashboard configuration, test_dashboard_goals), Kokoro GPU validated end to end
-vs the app's Python path (difference test PASS + the user's listening approval). Remaining perf gaps of the other
-models are deferred by the user (`[~]` items below). Published as https://github.com/lariaus/lokinfer, tag `v0.0.1`.
+## Goals
 
-## Done so far (summary, details in git history)
-- [x] Design Q&A → `impl-notes/design-decisions.md`; five research docs (`impl-notes/research-*.md`, all measured in Low Power Mode)
-- [x] Project skeleton: CMake+Ninja, pinned deps (SHA256), uv venv py3.14, nanobind editable build, lit+filecheck, metallib (macOS + iOS), `.gitignore`, `scripts/test.sh`
-- [x] **(goal)** IR ops/types/dims, structural verifier, text printer/parser, binary `.lkm` (mmap, 16 KiB-aligned) with round-trip and corruption tests
-- [x] **(goal)** Passes with FileCheck tests: bufferize (in-place, views, frees), plan-memory (static arena, runtime `mem.plan`, second plan after `dim.read`), hoist-init, insert-sync; pipeline test
-- [x] **(goal)** CPU runtime (single interpreter loop) and GPU runtime (Metal 4 direct encode, residency set, storage pool, byte-range barriers, MPS on our encoder)
-- [x] Python: tensors (numpy/DLPack zero-copy on CPU), `kernel_op` definitions, tracing `compile()`, static/dynamic/parametric shapes, eager kernel calls, save/load
-- [x] **(goal)** All 12 basic E2E graphs (CPU/GPU × static/dynamic × add, add+mul, matmul, Accelerate, MPS), C++ and Python
-- [x] iOS test host (`scripts/ios_deploy.sh`: C++ suite on the phone, then remote executor) + `lokinfer.remote` client; MNIST ran on the phone
-- [x] **(goal, partial)** MNIST MLP: correct vs PyTorch (97.44 % test accuracy), Accelerate variant beats torch-cpu at every batch (LPM numbers)
-- [x] Kokoro: bit-exact reference extractor (`models/kokoro/reference.py`, 9 cases), 25 basic CPU kernels + 151 kernel tests, graph `models/kokoro/model.py` (untested)
-- [x] Docs: `docs/compiler.md`, `docs/runtime.md`, `docs/python-api.md`, `docs/passes/*.md` (corrected 2026-11-01 to say built vs planned)
+1. **(user, 2026-11-02) Kokoro-82M and GPT-2 124M: lokinfer #1 in every configuration** (every device × case on
+   the dashboard), never regress. Kokoro is the most important model. Guarded by `tests/perf/test_dashboard_goals.py`;
+   any change touching their kernels / runtime is checked on the affected cases before landing.
+2. **(user, 2026-11-02)** Other v0.0.1 models (ResNet-18, MobileNetV2, DCGAN G/D, MNIST): within 5-10 % of the best
+   baseline, ideally #1.
+3. **(user)** Strictly apples to apples (same model, inputs, work and precision as the baselines). f32 for every model
+   except Qwen3-ASR-1.7B, which is **f16 on all four devices** (user, 2026-11-05), for lokinfer and every baseline.
+4. **(user, 2026-11-05) Qwen3-ASR-1.7B phase 1: not to beat anything** — golden reference data, a basic and a
+   slightly optimized lokinfer version, baselines on all four devices, on the dashboard as the first model, to measure
+   the gap. Not a goal model for the "#1 everywhere" guard.
 
-## Work log 2026-11-02 / 11-03 (was "Paused — resume here")
-- [x] The "other models iPhone" agent's paused work is finished (2026-11-03): the `tile=4` variant was Winograd F(4x4, 3x3) for the planar ResNet convs — measured on the phone and **dropped** (its GEMMs halve but the 6x6 transforms on the E cores cost more: N=8 64ch 970 → 945 µs, 128ch 690 → 830, 256ch 730 → 957; in-model N=1 3.06 → 3.16 ms), code removed, note in conv2d.cpp; build, unit 68/2 skipped, lit 23/23, pytest 929 passed (one intermittent segfault in `tests/python/test_call_api.py::test_submit_wait`, pre-existing submit/wait race, not in this scope), iPhone deploy 70/70 `LOKINFER_TESTS_EXIT_CODE=0`, test_dashboard_goals passes.
-- [x] `test_submit_wait[gpu]` intermittent segfault fixed (2026-11-03): a real race, not flakiness — `Tensor.numpy()` on result i runs `GpuContext::commitAndWait()` on the Python thread while the model's worker thread encodes call i+1 into the same process-wide context (faulthandler: main in `tensor.py numpy`, worker in `_call`). `GpuContext` now has a recursive mutex: `Executable::run` holds it for the whole call when the executable uses the GPU; `commitAndWait`, `wrapNoCopy`, `releaseAllocation`, `makeResident`, `adopt`, `pipeline`, `setMaxSegments` lock it themselves (recursive: kernels commit inside a run). Verified: 500 rounds of the GPU submit/wait test (4000 overlapping submits) clean.
-- [x] Final regression check, part 1 (2026-11-03, after the GPU mutex + server.cpp input-copy + sme2_gemm epilogue changes): Mac build; C++ unit pass; lit 23/23; pytest 929 passed / 4 skipped (incl. test_dashboard_goals), no segfault; iPhone deploy 70/70 `EXIT_CODE=0`. Focused iPhone (no-record): GPU word 30.5 / app59f 64.9 / app59m 70.5 / s9f 142.3 / s28f 443.0 ms (dashboard 31.7 / 66.2 / 71.9 / 143.2 / 616.7); CPU, phone cool: word 42.9 / app59f 105.2 / app59m 116.4 / s28f 776 (dashboard 42.8 / 107.9 / 121.8 / 912; a first CPU pass right after the GPU half read 8-17 % slower = heat); GPT-2 decode P=512 CPU 5.61 / GPU 5.59 (5.46 / 5.58). All far ahead of the best baselines, no regression.
-- [x] Final regression check, part 2 (2026-11-03): Mac focused, recorded (bench_kokoro_gpu / bench_kokoro / bench_m6 gpt2): Kokoro GPU word 26.2 / app59f 49.1 / app59m 52.1 / s9f 87.3 / s28f 260.9 ms; CPU fused 63 / 107 / 118 / 227 / 641; GPT-2 decode CPU 8.09 / GPU 2.06, prefill T=128 28.4 / 5.25, T=512 71.4 / 16.7 — no GOAL REGRESSION warning, test_dashboard_goals passes (lokinfer #1 in every Kokoro / GPT-2 configuration).
-- [x] Remote executor robustness (2026-11-03): a client vanishing mid-session no longer wedges the serial accept loop (TCP keepalive on accepted sockets, ~25 s) and a write to a closed client no longer kills the process (`SO_NOSIGPIPE`); docs/runtime.md. Mac tests + iPhone deploy 70/70 + remote MNIST run pass.
-- [x] Release packaging for 0.0.1 (2026-11-03): `README.md`, `LICENSE` (MIT; `third_party/mlx_steel` keeps MLX's MIT license), `VERSION` file read by CMake (`project(... VERSION)`; configure fails if pyproject.toml disagrees), `LOKINFER_VERSION` macro (PUBLIC on lokinfer_ir) and `lokinfer.__version__`. Fixed: lokinfer couldn't be built as a subproject (`CMAKE_SOURCE_DIR`/`CMAKE_BINARY_DIR` → `PROJECT_*`: the metallib build missed the MLX headers). Verified with a scratch FetchContent consumer: builds lokinfer as a dependency, loads a Python-saved GPU `.lkm` in C++, verifies + runs it, max |err| vs Python 0. Pre-publish scan: no secrets, no private-workspace references; personal paths + the iPhone UDID remain in bench/harness defaults and docs (to decide with the repo's visibility). Pending: the user's GitHub repo link → commit, push, tag v0.0.1.
-- [x] Public-release scrub (2026-11-03, user: public repo, no personal info, no paths outside the repo, no secrets): machine-local values (iPhone UDID, signing team, bundle id, baselines / english-practice / MLX paths, work dir) moved to the git-ignored `lokinfer.local.json` (template `lokinfer.local.example.json`; `python/lokinfer/localconfig.py`, `scripts/lk-config`, CMake reads it for LokiHost signing; env vars override); docs use `<udid>` / `<team-id>` / `<bundle-id>` / `<baselines>` / `<english-practice>` placeholders (docs/benchmarking.md "Local configuration"); signing identity / Apple ID removed from research-infra.md; host names in bench JSON neutralized; CLAUDE.md and impl-notes/original-plan.txt git-ignored (kept locally); e2e corpus: personal and third-party entries replaced by written texts. Secrets scan (key/cert/profile files, token patterns, ssh, passwords, emails, IPs): clean.
-- [x] Dependency build fix, folded into v0.0.1 (2026-11-03, user: amend + force-push, version stays 0.0.1): lokinfer as a dependency of an iOS build failed to configure (the iOS branch always added LokiHost, which links Catch2, absent with LOKINFER_BUILD_TESTS=OFF, and needs signing). New `LOKINFER_BUILD_DEV_TOOLS` (default `PROJECT_IS_TOP_LEVEL`): off → only the libraries + lokinfer.metallib (no tools / bench lib / bench.metallib / LokiHost / unit tests). Prompted by english-practice's patch, which instead deleted LokiHost (would break lokinfer's own device tests) — not applied as is. Verified: lokinfer's Mac build (tools + tests), its iOS Xcode project (LokiHost present), and a scratch iOS consumer (FetchContent, tests off) configures + builds (libs + metallib only). Also from english-practice's second patch: the Metal `-O0/-O3` choice was a `$<CONFIG:Debug>` genex in the custom command, which breaks the Xcode generator; now chosen at configure time from CMAKE_BUILD_TYPE (multi-config → -O3). Verified: iOS Xcode consumer, Debug build, builds lokinfer.metallib + libs.
-- Kernel harness iPhone pass finished (perf/kernels.sqlite); iPhone multi-stream SME bench: 6 concurrent single-threaded streams 2.32 TF/s aggregate (≈ linear: 1.19 at 3, 1.56 at 4) — contradicts the earlier "1 stream best" for the CPU SME path; re-check before relying on it.
-- Status at pause: lokinfer #1 in 112/120 configurations (Mac CPU 30/30, Mac GPU 30/30, iPhone CPU 25/30, iPhone GPU 27/30); goal 1 (Kokoro + GPT-2) 76/76.
+## Done in v0.0.1 (summary)
 
-## Goals (user, 2026-11-02) — non-negotiable, never regress
-1. **Kokoro-82M and GPT-2 124M: lokinfer #1 in every configuration** (every device × case on the dashboard: Mac CPU,
-   Mac GPU, iPhone CPU, iPhone GPU; all Kokoro workload/long/edge cases, GPT-2 prefill T=128/512 and decode). Kokoro
-   is the most important model. Guarded by `tests/perf/test_dashboard_goals.py` (fails if any recorded Kokoro / GPT-2
-   configuration has a baseline faster than lokinfer); any change that touches their kernels/runtime must be checked
-   on the affected cases before landing.
-2. Other models (ResNet-18, MobileNetV2, DCGAN G/D, MNIST): within 5-10 % of the best baseline everywhere, ideally #1
-   — important, but below goal 1.
-3. f32 only, strictly apples to apples (same model, inputs and work as the baselines).
+- Core stack: MLIR-like IR, verifier at load and after every pass, compiler pipeline (dce, bufferize, plan-memory,
+  hoist-init), runtime (CPU thread pool, Metal 4 GPU context with in-flight segments, thread-safe), Python + C++ APIs,
+  save / load (`.lkm`), remote executor (LokiHost on the iPhone), profiling tools (prof-lokinfer, kbench), perf
+  dashboard with locks and perfdb.
+- Models (f32, Mac CPU / Mac GPU / iPhone CPU / iPhone GPU): Kokoro-82M (fused CPU, Winograd / SME2; GPU end to end),
+  GPT-2 124M (prefill, decode, chunked generation), ResNet-18, MobileNetV2, DCGAN G / D, MNIST MLP. Kokoro and GPT-2
+  #1 in every dashboard configuration (113 / 120 configurations overall).
+- Kokoro end-to-end quality validated against english-practice's Python path on 225 texts (Mac GPU and iOS GPU:
+  difference test PASS, the user's listening approval); `tests/e2e/kokoro/`.
+- Public release scrub: machine-local values in the git-ignored `lokinfer.local.json` (`docs/benchmarking.md` "Local
+  configuration").
 
-## When the iPhone is back (deferred while the phone was unavailable, 2026-11-02)
-Remove `/tmp/lokinfer-phone-disabled`, then one phone-locked session per group (focused runs, not full sweeps):
-- [x] (2026-11-02, phone back: 70/70 on-device test cases pass incl. `[memplan]`, `[bake]`, `[sme2]`) Deploy (`scripts/ios_deploy.sh`) — the IR (mem.plan element offsets, shared arenas), runtime, SME2 engine and kernels all changed since the app on the phone; check `LOKINFER_TESTS_EXIT_CODE=0` incl. `[sme2]`, `[sme2bench]`
-- [x] (planar wins at N=1 only: 3.28 vs 4.19 ms, ExecuTorch 2.93; N=8 24.99 vs 23.07 — both recorded as `lokinfer` / `lokinfer planar`; next: multi-stream / hybrid for N=8) ResNet-18 iPhone CPU: `build` vs `build_cnhw` (planar SME2 path) at N=1 / N=8 with the torch check (a local A/B script, `resnet18` vs `resnet18_cnhw`); if it wins, switch the iPhone row in `bench_remote_models.py` and record; optionally `LOKINFER_SME2=1` for MobileNetV2 / DCGAN D (convnets agent notes)
-- [x] (iPhone GPU N=1 2.43 / N=8 12.90 ms vs MLX Swift 2.70 / 14.31 — ahead) ResNet-18 iPhone GPU: the 2-D Winograd point split was tuned on the Mac's 30 GPU cores — check N=1 / N=8 on the phone's 6
-- [x] Kokoro iPhone CPU: the sme2_conv → sme2_gemm merge A/B; the Mac-side Kokoro CPU agent changes (app59f + s9f) — 2026-11-02: merge A/B (interleaved, nominal) app59f 98.0/99.6 vs old tile 98.7/102.7 ms, s9f 208.4/213.3 vs 211.4/218.7; the Mac-side changes' per-kernel iPhone check in impl-notes/iphone-cpu-sme2.md (ALBERT fused ops reverted: iPhone regression)
-- [x] (Kokoro app59f iPhone CPU 97.2 ms, GPU 64.7 ms; GPT-2 prefill T=128 iPhone CPU 23.1 ms — no regression) Kokoro / GPT-2 iPhone CPU no-regression check (they share gemm.cpp): app59f, prefill T=128
-- [x] (iPhone GPU 209/209 (run 4) and iPhone CPU 237/237 (run 5) recorded in perf/kernels.sqlite — the phone was at 'serious' for most of both, so treat absolute times as throttled; AMX done; runtime variants done) Bench harness: `tools/kbench run -d iphone-gpu --part I/6` then `-d iphone-cpu` (`--append latest:<device>`); `bench/harness/runtime_variants.py --iphone`; `bench/harness/lokihost.sh run OUT.log --bench-amx` then `restore`
-- [x] Runtime agent items on the phone (done by the runtime agent while the phone was back): pytest `--device=iphone` 62 passed, reference cache, iPhone RSS, replay / in-flight A/B
-- [x] GPT-2 iPhone GPU rows recorded: prefill T=128 11.45, T=512 39.23, decode 5.59 ms
-- [x] sme2_gemm N-tail blocks: when the last column chunk has nt ≤ 16, run it as 64-row × 16-column blocks (four ZA tiles stacked along M) — the Kokoro decoder Winograd GEMMs at app59f have n = 37 (m = 1024), wasting 42 % of a 32-col block; ~0.1 ms × ~9 convs on the phone (Kokoro CPU agent's proposal; engine change + phone A/B) — 2026-11-02 (Kokoro CPU agent): built (`block64x16`, plain GEMMs, modes 0/1), on-device test passes; iPhone A/B app59f 98.0/99.6 vs 100.3/101.2 ms without
-- [x] Kokoro LSTM_T: sme2::gemvT is now a 4-partial-sum kernel bit-identical to a NEON version passing all 26 free-running SNR cases on the Mac with `LOKINFER_KOKORO_LSTM_T=1` (app47m 37.9 dB vs limit 37.5) — check the `[sme2]` bit-exactness test on the phone, then consider enabling LSTM_T by default — 2026-11-02: `[sme2]` bit-exactness passes on the phone; not faster on app59f (98.4/101.0 vs 98.0/99.6 ms) → stays opt-in
+## Deferred (user, 2026-11-03)
 
-## M0 — Fix the foundations before more kernels (no fused kernels yet)
-Decisions (recorded in `design-decisions.md` once the user answers the open questions in the plan review):
-- [x] Re-baseline Kokoro with Low Power Mode off (rand510 / real117): torch eager CPU 2280 / 799 ms, torch.compile CPU 2067 ms, torch eager MPS 1062 / 351 ms, torch.compile MPS 877 ms, **MLX GPU 858 / 193 ms (best GPU)**
-- [x] Re-baseline MNIST and the runtime-overhead benchmark (LPM off) — MNIST dashboard rows are LPM-off; runtime overhead 2026-11-02: one-kernel CPU graph 379 ns vs 58 ns direct (≈ 320 ns, was ~200 ns in LPM), GPU graph 94 µs/call (`benchmarking.md` "Runtime overhead")
-- [x] Re-verify the multi-stream AMX finding out of LPM (3 concurrent single-thread `sgemm` = 3.4 TFLOPS vs 2.0 default); it is the center of the CPU strategy — **Mac confirmed (2026-11-02, `lokinfer-bench-conv amx`): 1 stream 1.55 TF, Accelerate threaded 2.73, 3 streams 3.39, 6 streams 4.70 TF (512×768×768); Kokoro conv tile 6 streams 3.89 vs 2.20 threaded** (`m2-conv-proof.md`); iPhone: needs iPhone run (`LokiHost --bench-amx`, built) — **iPhone (LokiHost --bench-amx, 2026-11-02)**: 6 concurrent single-threaded Accelerate streams 2.32-2.55 TF/s aggregate on Kokoro's conv tile / ALBERT QKV / 512×768×768 vs 1.15 for one stream and 1.02-1.11 for Accelerate threading (E-core streams add throughput through Accelerate); 1024³ is the exception (6 streams 1.05 vs 1.19) → Kokoro iPhone CPU E-cluster agent (2026-11-02)
-- [x] Noise/RNG decided (user): like PyTorch — generated inside the model from a settable seed (Philox in the harmonic-source kernel, `nohoist`); explicit `noise` input only in a parity-test variant
-- [x] ~~`F` handling: one GPU→CPU readback with overlap~~ — superseded (triage 2026-11-02): the duration predictor runs on the CPU in both builds, so `F` is computed on the CPU (`dim.read` of a CPU tensor) and never read back from the GPU; CPU/GPU overlap is via async commit
-- [x] iPhone targets decided (user): an artificial target = Mac result × (Mac peak / iPhone peak) per device class, peaks measured in M2; the goal is to beat it. Compute and publish the number in M2
-- [x] Threading decided (user): depends on the graph — small kernels run inline one by one; big kernels use the multithreaded runtime and run async. Design: per-kernel work estimate + per-device threshold; pool only above it
-- [x] Other models decided (user): as much perf as possible, not required to beat PyTorch
-Design/IR fixes the Kokoro graph needs (found by review; small, but they change the IR contract):
-- [x] Dims: simplify `(a·X + b) // c` when `c | a` (stride-2/6 conv output lengths must prove equal to `F`, `20·F`)
-- [x] Symbol binding from linear dims at call time (`[600*F, 9]` must bind `F`), or make `F` an explicit scalar input
-- [x] Structural attrs (`nohoist`, `inplace`, `output`, `arena`) separated from kernel attrs so they never shift the kernel int ABI; consistency check that every registered kernel has a Python def with the attr order the adapter expects
-- [x] `view` bounds check in the verifier/loader (element count of result ≤ source); `embedding` id range check in the reference kernel
-- [x] **Mixed CPU/GPU = explicit device boundaries in the IR, never inferred (user decision 2026-11-01):** `ops.to_cpu`/`ops.to_gpu` emit the `sync` op from the Python graph (no copies: unified memory); `insert-sync` becomes `verify-devices` (residency tracking; rejects implicit crossings and CPU writes over pending GPU reads/writes); E2E mixed CPU/GPU test. Removes the alias-root and write-after-read bugs of the inference pass
-- [x] **Verification is not a pass (user request 2026-11-01):** `verify`, `verify-devices`, `verify-buffers` were read-only, so they became an MLIR-style always-on verifier (`docs/verifier.md`): run at load/build and after every pass in `runPasses` (names the pass that broke the IR), buffer form auto-detected; default pipeline is now dce → bufferize → plan-memory → hoist-init
-- [x] **Region result types in the IR (user request 2026-11-01):** `init -> (...) {` / `exec(...) -> t {`, MLIR style, printed by the C++ printer and the Python trace (`source_ir`); the parser checks them against `return` (optional in hand-written IR)
-- [x] No copies of graph inputs, outputs or weights on GPU models (user: avoid copies in general): mmapped `.lkm` data and captured tensors wrapped in place; owned caller inputs wrapped (page range + offset, cached per input); pool size classes ≤ 12.5 % waste; buffer release deferred to segment end (no mid-call commit+wait)
-- [x] Constants carry an explicit `device` (from the captured tensor); GPU models are GPU end to end (`transpose_f32_gpu` hoisted into init)
-- [x] Unbound-symbol evaluation: fail loudly (no `INT64_MIN` arithmetic); release builds keep cheap checks on input binding
-- [x] hoist-init must not hoist kernels whose `dim<...>` attrs or defined symbols depend on exec inputs; the verifier must not let `init` reference exec-arg symbols
-- [x] bufferize in-place reuse must check alias roots (a view of the destination among the operands) and extend lifetimes after renaming so in-place chains actually reuse
-- [x] Outputs that are state/constant values must be copied (or marked read-only), never handed out as mutable aliases of model memory; symbols defined in `init` must survive per call
-- [x] Harden untrusted input (the phone listens on the network): `.lkm` loader overflow-safe bounds, enum/id/constant-size validation, `verifyModel` before `Executable::create` in the server, frame-size caps and shape↔nbytes checks in the remote protocol, iterative/depth-limited and overflow-checked dim/text parsers
-- [x] Runtime tests the review found missing: done — mixed CPU/GPU graph, in-place (aliased operand, chains), returning inputs/constants, multiple outputs, GPU no-copy inputs, mmapped GPU weights, loader/parser hostile input, linear binding, view bounds, init symbol scoping; `dim.read` + dynamic `mem.plan` end to end (every Kokoro free-running test); **remote-protocol fuzzing (runtime agent, 2026-11-02): `tests/unit/test_remote_fuzz.cpp` (hostile headers, ~50 malformed requests, 3000 random/mutated frames, 400 corrupted model blobs, in-process server session = lokinfer-serve/LokiHost code) + a lokinfer-serve process test; found + fixed a Metal abort on non-UTF-8 GPU_INSPECT names, a 2 GiB up-front allocation, dtype ≥ 256 wrapping to F32, unchecked scalar byte counts**; the C++ suite incl. the fuzz tests passes on the iPhone (LOKINFER_TESTS_EXIT_CODE=0)
-Process:
-- [x] `design-decisions.md`: add the later decisions (port order, Metal-4-only ⇒ macOS/iOS 27 only, LPM, iPhone standing permission) and the M0 decisions — done 2026-11-02: log extended (verifier, region types, devices, threading, LSTM/channel-last, Kokoro shapes, timing/lock rules, apples-to-apples, f32 only, sustained vs burst, focus on affected cases; dated, user vs derived) and superseded Q&A answers annotated
-- [x] Keep every design doc marked **built / planned** per section (done once 2026-11-01; keep it that way) — re-swept 2026-11-02: design-*.md, compiler, runtime, python-api, passes/*, benchmarking, correctness-testing, verifier all marked per section and corrected against the code
-
-## M1 — Kokoro correct on CPU with the basic graph — done 2026-11-01
-Blockers found 2026-11-01 (all fixed):
-- [x] Weight fold via torch's own `_weight_norm` (no copy of the model)
-- [x] Graph type errors at trace time (fixed by the M0 Dim simplifier); a hoisting bug with symbolic views of constants (`pos[0:T]`) found and fixed
-- [x] `F` bound from the noise input (M0 linear binding); checked against `dim.read` in the free-running variant
-Then:
-- [x] Stage-by-stage tests vs the reference: token-rate and decoder stages ≤ 5e-5 rel; `post` < 1e-2; `har` magnitude + circular, energy-weighted phase
-- [x] Durations exact on all 9 reference cases (T = 3 … 512) — no reduction-order fix was needed on these; the near-.5 kernel test remains a known weak spot
-- [x] `repeat_interleave` errors when `frames ≠ Σdur`; `embedding` errors on ids out of range (new kernel error channel `ExecCtx::error`)
-- [x] Audio judged against a float64 golden of the same forward (`reference.golden_audio`): lokinfer f32 is as close to it as PyTorch f32 (within 3 dB, better on most cases)
-- [x] Shipped variant `(ids, ref_s, speed, seed)` with in-kernel Philox noise (`harmonic_source_rng_f32_cpu`): deterministic per seed, correlation with the reference 0.992–0.997 (= PyTorch seed-to-seed); parity variant `explicit_noise=True` matches the reference
-- [x] Unfused graph timed (LPM off): real28 271 ms (torch CPU 252), real117 1015 (799), rand510 3208 (2280); `snake` vectorized with vvsinf (exact torch formula) took rand510 from 4374 to 3208 ms
-- [x] `docs/models/kokoro.md` and `docs/models/mnist-mlp.md` **(goal: one doc per model)**
-
-## M2 — Conv proof: de-risk the 90 % before writing the fused layer
-Through the kernel library only (no runtime), Mac CPU, Mac GPU, iPhone GPU via the remote executor:
-- [x] Kernel benchmark harness **(goal)**: Google Benchmark (CPU), Metal GPU-time harness (N dispatches per command buffer), remote variant on the phone, results DB (SQLite) keyed by device/commit/kernel/shape/power state, comparison report — built (`tools/kbench`, `bench/harness/`, `lokinfer_bench_kernels`, `perf/kernels.sqlite`; `benchmarking.md` "Kernel harness"); Mac CPU 237 + Mac GPU 209 real-shape cases measured, runtime vs direct-call paths agree within 4 %; remote (iPhone) path: needs iPhone run — complete 2026-11-02/03: Mac CPU 237, Mac GPU 209, iPhone GPU 209, iPhone CPU 237 cases recorded; gbench path; compare report
-  - [x] Perf dashboard: `perf/results.json` + `perf/index.html` (`scripts/perf_dashboard.sh`), `docs/perf-dashboard.md`
-- [x] Stage-1 (`C=128, L=120F+1`) and stage-0 (`C=256, L=20F`) conv1d at k3/k7/k11 × d1/d3/d5, F ∈ {278, 1127}: — closed 2026-11-02 (Kokoro CPU agent): CPU sub-items done; the iPhone GPU tensor-op sub-item is tracked under its own line
-  - [x] CPU (`docs/impl-notes/m2-conv-proof.md`): **time-tiled im2col (512-sample tiles) over 8 single-threaded Accelerate streams = 2.04 TF** on stage-1 k11 (4.2× the basic kernel; PyTorch ≈ 0.5–0.8 TF); shifted GEMMs 0.9–1.5 TF; 2048-sample tiles overflow L2 (0.3 TF)
-  - [x] CPU tuning: tile 256/768, 6/10/12 streams, per-K, E-cores; BNNS conv as a library candidate (partial: the runtime thread pool with dynamic tiles beats raw threads at every tile size; 768 is the best so far) — closed 2026-11-02: tile / stream changes alone never paid (fused conv 768 best; Winograd tiles 256/1024/2048 on the Mac within ±5 % or slower; full-M plain-U sgemm slower); what won was the iPhone P/E split (GEMMs on the P cluster's SME unit, transforms on the E cores) and, on the Mac, reading Winograd B in place for G ≤ 2 (decoder 1024×147 K3 0.52 → 0.34 ms); BNNS not pursued (impl-notes/iphone-cpu-sme2.md "Round 3")
-  - [x] GPU (M2 Max): hand-written implicit-GEMM ≤ 1.1 TF; MLX steel (MIT) vendored in `third_party/mlx_steel`; **steel conv1d channel-last through lokinfer's runtime = 6.2–6.75 TF** (MLX conv1d 6.4–6.5, steel GEMM 8.7); decision: GPU frame-rate path is channel-last `[L, C]`
-  - [x] iPhone 18 Pro Max (`LokiHost --bench`): CPU tiled 1.44–2.08 TF (6 streams, ratio 0.86 vs Mac), GPU steel f32 2.63–2.69 TF (ratio 0.41) → **artificial iPhone targets CPU ≤ 2400 / 930 ms, GPU ≤ 2090 / 470 ms** (rand510 / real117)
-  - [x] iPhone GPU: Metal 4 tensor ops (`matmul2d`) — f16 superseded by the f32 rule; f32 experiment (Winograd agent, 2026-11-02): MPP `matmul2d` f32 GEMM vs steel / MPS — Mac 0.7-0.95× of steel, iPhone ≈ MPS (≤ 1.23× steel at 64×64 tiles); Winograd point-GEMMs via MPP only 1.06-1.27× the full fused Winograd GEMM on the iPhone before its extra output-transform pass → rejected, code removed (winograd-conv.md)
-  - [x] iOS host records thermal state + Low Power Mode: `--bench` prints `LOKINFER_DEVICE_STATE` before/after; the remote HELLO returns them live (`RemoteDevice.state()`), shown per case by `bench_kokoro_remote.py` (deploy pending)
-- [x] Exit numbers (Mac): CPU 2.04 TF (≥ 1.8 ✓), M2 GPU 6.75 TF (≥ 4.0 ✓) — `docs/impl-notes/m2-conv-proof.md`
-- [x] LSTM placement decided by measurement (2026-11-01): CPU step ≈ 8-12 µs (sgemv of 1 MB w_hh from L2 + gates), a GPU per-step dispatch alone costs more and a persistent GPU kernel can't sync threadgroups per step → LSTMs on the CPU in both builds
-- [x] `docs/benchmarking.md` **(goal)** (methodology written; tools marked planned)
-
-## M3 — Fused Kokoro on CPU → beat torch.compile CPU (2067 ms @ 510 tokens) and eager (2280 / 799 ms @ 510 / 117)
-- [x] Per-kernel profiler in the runtime: CPU wall time per kernel; GPU via Metal 4 timestamps per kernel (~1 % overhead, `prof-lokinfer`, docs/profiling.md)
-- [x] Thread pool used only above a per-kernel work threshold (user decision); time-tiled multi-stream conv engine (winner of M2) — done (sub-items); "big independent kernels may run async" moved to the LSTM-overlap item under M4
-  - [x] `rt::ThreadPool` (`src/runtime/thread_pool.cpp`): P-core-sized persistent workers at USER_INTERACTIVE QoS, `parallelFor` with an atomic task counter, the caller participates, 50 µs spin before sleep; unit-tested (every index exactly once, 0–1000 tasks × 50)
-  - [x] `conv1d_fused` runs inline below 4 M MACs and on the pool above
-- [x] `conv1d_fused`: per-channel affine + {leaky, snake} prologue, — all sub-items done (2026-11-02)
-  - [x] first cut (`kernels/cpu/kokoro_conv_fused.cpp`): `conv1d_{snake,snake_res,leaky,affine}_f32_cpu` (stride 1) with the AdaIN affine `[3, Ci]` = (mean, scale, beta) centered prologue, bias/residual epilogue, and per-(channel, 128-sample chunk) `(mean, M2)` stats; `channel_stats_f32_cpu` + `adain_affine_f32_cpu` (Chan combine in double); 24 tests vs float64 torch including a chained symbolic-L resblock1 iteration
-  - [x] `conv1d_leaky_res_f32_cpu` (residual + `oscale` epilogue) and fused `adain_resblk` (decoder encode/decode, predictor F0/N blocks; the upsample block keeps its basic dw-convT front): −22 ms at rand510 (interleaved A/B)
-  - [x] remaining: input transforms (gather by `idx`, nearest ×2, depthwise convT, virtual concat, 3-input mean) — the bias/residual/×1/√2 epilogue and the per-chunk stats partials exist — 2026-11-02: 3-input mean fused into both consumers (polyphase convT, conv_post Winograd; add3_scale gone, bit-identical); depthwise convT rewritten as a per-output gather on the pool (0.75 ms at app59f before); gather-by-idx / nearest ×2 / virtual concat not measurable (0.01 / 0.07 / 0.08 ms at app59f) (impl-notes/iphone-cpu-sme2.md "Round 3")
-- [x] `adain_stats_finalize` — done as `adain_affine_f32_cpu` (two-pass Chan combine in double, line above) / `adain_affine_lc_f32_gpu`
-- [x] Polyphase ConvTranspose1d (ups[0] k20 s10, ups[1] k12 s6) with leaky prologue and `+ x_source` epilogue — 2026-11-02: `conv_transpose1d_poly[_mean3]_f32_cpu` (phase groups as GEMMs over one leaky window, x_source + reflect pad in the epilogue; SME2 on P cores): Mac ups0+ups1 incl. leaky/pad/add 5.45 → 1.89 ms; iPhone 4.49 → 3.14 ms (with the resblock mean); conv_post as leaky Winograd: Mac 2.56 → 0.50, iPhone 1.68 → 0.80 (impl-notes/iphone-cpu-sme2.md "Round 3")
-- [x] Shared stats across the three resblocks of a stage (`xst` computed once, CPU and GPU)
-- [x] Fused BiLSTM (input projection as one GEMM at token rate, both directions concurrent, gates fused, `b_ih + b_hh` folded)
-  - [x] both directions concurrent on the pool (single-threaded sgemv each), gates vectorized (vvexpf/vvtanhf): 150 → 51 ms at rand510 (both measured in LPM); input projection was already one GEMM, biases already folded
-- [x] Token-rate front end: QKV fused GEMM, FFN + gelu epilogue, residual + LN epilogue, attention d=64, embedding + LN — 2026-11-02: in-model ALBERT GEMMs are ~1.3× standalone, not 2× (pool kernels between MT Accelerate GEMMs ≈ +10 %, 21 MB of weights cycling vs one hot matrix); GPT-2's fused ops (gelu epilogue, add+bias+LN) won 0.44 ms on the Mac but lost 1.4-2.8 ms on the iPhone (interleaved A/B) → not used; Mac 8-column split (8.04 vs 8.41 ms) handed to gemm.cpp's auto split (impl-notes/iphone-cpu-sme2.md "Round 3")
-- [x] Style projections batched: one GEMV per style vector and model root (decoder 37 396 + predictor 12 288 outputs, `W.style_bank`), each AdaIN reads a zero-copy view (151 → 77 GEMM calls; time was small: the remaining GEMM time is BERT's 512×768 GEMMs, ≈ 68 ms)
-- [x] Alignment as gather pushed through the shared-LSTM input projection and `asr_res`; implicit gather in the decoder conv prologue — 2026-11-02: not measurable (repeat_interleave 0.01 ms, asr_res conv 0.02 ms at app59f); not done
-- [x] Fused harmonic source + STFT (in-kernel Philox, polynomial sin), fused `post_istft` — 2026-11-02: vectorized instead of fused (NEON Philox, sin4Wide, log4/tanh4; STFT/iSTFT 4 frames per step): iPhone harmonic 2.71 → 0.78 ms, STFT + iSTFT 1.89 → 0.58; Mac 0.63 / 0.36 / 0.54 ms after; fusing would save < 0.05 ms (harmonic+STFT) / ≈ 0.1 ms (iSTFT into conv_post) → not done (impl-notes/iphone-cpu-sme2.md "Round 3")
-- [x] NEON polynomial transcendentals (sin/cos/exp/tanh/sigmoid) shared by all CPU kernels — 2026-11-02: `kernels/cpu/neon_math.h` exp4 / log4 / sin4 / cos4 / sinSq4 / sin4Wide / tanh4 / atan2_4 with measured bounds (unit test "neon_math", Mac + iPhone; sinSq4 2.5e-7); LSTM gates keep vvexpf/vvtanhf on purpose (chaotic F0 path)
-  - [x] `detail::sinSq4` (π reduction + degree-11 odd poly, max abs err ~2.4-2.6e-7 for |x| < 1e4 (code comment 2.4e-7; to re-measure)) in the fused Snake prologue
-- [x] Every fused kernel tested against the composition of basic kernels over shape sweeps, plus the stage references — 2026-11-02: polyphase convT (7 shapes vs torch f64), mean3 prologues (bit-exact vs add3_scale → kernel), lstm_bidir2 (bit-exact vs two calls), lstm_bidir_t (vs f64), SME2 conv-window GEMM incl. the 64×16 tail and gemvT bit-exactness (on the phone), neon_math bounds; earlier fused/Winograd tests unchanged
-- [x] Speed-regression test for Kokoro per device (thresholds from measured noise) **(goal)** — `tests/perf/test_kokoro_speed.py` (opt-in `LOKINFER_PERF_TESTS=1`; `LOKINFER_IPHONE=<udid>` adds the phone): real117 CPU + GPU vs `tests/perf/kokoro_speed.json` baselines × margin (CPU 1.15, GPU 1.2; measured noise 0.7 % / 5.4 %)
-- [x] Fused generator resblocks wired into `models/kokoro/model.py` (`build(fused=True)` default; `fused=False` = M1 graph); all 14 Kokoro tests pass, SNR vs f64 golden on par with torch f32 (e.g. rand510 26.8 / 26.8 dB)
-- [x] **(goal)** Beat Kokoro-82M model inference perf vs PyTorch on CPU — **Mac, apples to apples, LPM off (2026-11-01, battery): lokinfer fused 103 / 344 / 920 ms (real28 / real117 / rand510) vs torch.compile 237 / 705 / 2129, torch eager 277 / 857 / 2520** → 2.3× / 2.0× / 2.3× faster than the best baseline. **iPhone 18 Pro Max** (`bench/models/bench_kokoro_remote.py`): rand510 **1230 ms** (target ≤ 2400), real117 **397 ms** (≤ 930), real28 110 ms
-- [x] (closed 2026-11-02: never recurred over hundreds of profiled / benched calls since) One-off 21.8 s stall inside `conv1d_snake_res` during one profiled rand510 call (LPM, battery, 2026-11-01); 30 consecutive calls afterwards max 1279 ms. Watch for recurrence; if it happens again, instrument `ThreadPool::parallelFor` waits
-- [x] Per-kernel profiler: `LOKINFER_PROFILE=1` prints per-kernel time / calls / share after each call, `=2` splits rows by shapes (`src/runtime/executable.cpp`; GPU rows are encode time only)
-- [x] Profile-driven fixes: attention softmax vectorized + heads on the pool (122 → 12 ms), GELU via vvtanhf (71 → 12 ms), harmonic source parallel over sample blocks, bit-identical (84 → 12 ms), adain_affine two-pass (26 → 8 ms), channel_stats on the pool; **bug fixed**: the pool's caller thread was left with single-threaded BLAS forever (`detail::parallelForSt` restores it)
-- [x] **(goal)** Beat Kokoro-82M E2E (ids + style + speed → audio, forward only) vs PyTorch on CPU — same measurement as above (the bench times exactly ids + style + speed → audio)
-- [x] `docs/kernels/convolution.md`, `docs/kernels/gemm.md`, `docs/kernels/elementwise.md`, `docs/kernels/reductions.md` **(goal)** written from what M2/M3 measured — done 2026-11-02: kernel inventories, how they work, sourced measurements ("not measured" otherwise), rejected variants, open ideas
-
-## M4 — Kokoro on the Mac GPU → beat MLX (858 ms @ 510, 193 ms @ 117; best GPU baseline at every length)
-- [x] GPU context with several in-flight command buffers (runtime agent, 2026-11-02; the `F`-readback half is superseded): segment slots (`LOKINFER_GPU_INFLIGHT`; default 2 on macOS, 1 on iOS), queue barrier when a segment opens behind an in-flight one, one autorelease pool spanning them; Mac GPU (interleaved A/B): Kokoro app59f 50.7 → 50.1 ms, GPT-2 prefill T=128 5.04 → 4.90, decode 2.17 → 2.03; iPhone: Kokoro 65.6 → 64.9, GPT-2 decode 5.81 → 5.59 but prefill T=128 bimodal (11.3 / 12.9 vs 11.56) → iOS keeps 1 slot (never-regress goal)
-  - [x] `GpuContext::commitAsync()`: the executor commits pending GPU work without waiting whenever a CPU kernel follows (CPU kernels never read GPU results without an explicit `sync gpu_to_cpu`), so CPU and GPU overlap; one segment in flight, deferred releases (real117 181 → 178 ms, rand510 507 → 484 ms, LPM)
-- [x] GPU versions of the M3 kernel families — done: steel + Winograd convs with fused prologues/epilogues, convT as GEMM + gather, attention, LN, iSTFT, F0/N; LSTMs on the CPU by decision; harmonic source + STFT stay on the CPU, overlapped with the GPU decoder
-  - [x] Stage 1+2 (`kernels/gpu/kokoro_lc.{metal,cpp}`, `ops/kokoro_gpu.py`, `build(gpu=True)`): decoder + generator on the GPU, channel-last. lokinfer-owned copy of the steel conv with a fused bias/residual/scale epilogue; AdaIN affine+snake/leaky, chunk stats, AdaIN affine (padded channels → 0), ConvTranspose as MPS GEMM + gather (reflect-pad and `+x_source` fused), dw-convT, upsample, concat+pad (514/1090 → 528/1104 channels), add3, layout conversion. 29 kernel tests + 4 model tests (GPU vs CPU rel < 1e-4; SNR vs f64 golden on par with torch f32)
-  - [x] GPU convs run at ≈ 6 TF in LPM (steel peak); the rest of the GPU time is ≈ 15 ms of elementwise/stats. Remaining time is the CPU front end (BERT GEMMs, LSTMs) before the GPU starts
-  - [x] ALBERT on the GPU (`albert_gpu`, `kernels/gpu/kokoro_tok.metal`): fused QKV MPS GEMM + `attention_qkv_f32_gpu` (online softmax, biases folded into the reads), `bias_gelu_f32_gpu`, `add_bias_layernorm_f32_gpu`; the text encoder (CPU) overlaps it through async commit. GPU tests are now judged like the CPU graph: every stage vs the torch reference (forced durations, same thresholds) + free-running SNR vs f64 golden (a GPU-vs-CPU-graph 1e-4 check is not meaningful once ALBERT differs at ulp level: the LSTMs amplify it)
-  - [x] GPU memory: buffers no CPU op touches are `gpu_only` (bufferize) — freed at their real last use and planned in their own arena (plan-memory), since GPU-to-GPU reuse is ordered by the queue + byte-range barriers; only CPU-touched buffers keep the lifetime extension to the next `sync gpu_to_cpu`. Kokoro GPU arenas: rand510 7.7 GB → 0.7 GB, real117 2.6 GB → 0.23 GB (fixes "out of memory for arena" on the iPhone)
-  - [x] Flash-style GPU attention (`lk_attention_qkv_flash`: 32-query blocks share K/V tiles in threadgroup memory, online softmax, causal option): GPT-2 prefill T=512 23.5 → 20.9 ms; also ALBERT
-  - [x] Steel conv 32×32-tile variant picked when the 64×64 grid is too small (ResNet-18 GPU N=1 3.8 → 2.4 ms)
-  - [x] Conv tile A/B on Kokoro Mac GPU (prof-lokinfer, 2026-11-01; convs ≈ 62 % of rand510, occupancy ~22 %): 64×64×16 361 ms vs 64×64×32 390, 128×64 376, 64×128 378 → kept 64×64×16, experiment removed. Measured afterwards (prof-lokinfer FLOP count per conv shape): Kokoro's GPU convs already run at the steel f32 ceiling — **iPhone 2.62 TF (real117; steel peak 2.63–2.69), Mac 6.3 TF (rand510; ≈ the M2 proof's steel number)** — so occupancy is not the limiter and tiling has nothing left. Remaining levers: fewer FLOPs (1D Winograd / FFT-style conv, f32-accuracy permitting) or fusing the elementwise passes around the convs (snake 14 ms + stats 10 ms of rand510 on the Mac)
-  - [x] **Winograd generator convs on the GPU (agent, 2026-11-01, default)**: F(4,3) for K=3; K=7/11 as groups of 4 taps sharing one 7-point transformed input (f32-accurate: per-conv rel RMS 6.2e-7 vs steel 5.7e-7, E2E SNR within 0.1 dB on 14 cases); dilation via interleaved subsequences; AdaIN+Snake fused into the input transform (the separate snake pass is gone); `LOKINFER_KOKORO_WINO=0` for A/B. **iPhone GPU app59f 98.6 → 70.0 ms, real117 229.5 → 159.6, rand510 691.7 → 487.8; Mac GPU app59f 55.6 → 52.5, real117 115.7 → 101.2, rand510 330.8 → 288.8, word 29.1 → 26.8**; 45 new tests; docs/impl-notes/winograd-conv.md. ResNet-18 2-D Winograd built + tested but not wired (only 14²×256 at N=8 wins; N=1 0.49-0.85×)
-  - [x] Winograd round 2 (agent, 2026-11-01/02): output channel stats fused into the K=3 / K=11 Winograd GEMM epilogue (stats pass 10.9 → 2.2 ms on Mac rand510; K=7 keeps the separate pass: 8-19 % slower fused); decoder K=3 convs + conv_post on Winograd with the leaky prologue (`LOKINFER_KOKORO_WINO_DEC=0` for A/B); input-transform fusion into the previous conv is impossible (Snake needs the AdaIN affine of the whole previous output); loader variants all slower (Winograd GEMM: 8.4 % occupancy / 35 % F32 util vs steel 16.7 % / 58 % — register-bound). **iPhone GPU app59f 70.4 → 66.4, app59m 76.4 → 71.9, word 33.2 → 31.6; Mac GPU ~2 % (app59f 52.5 → 51.8, real117 113.6 → 104.0, rand510 303.2 → 295.2)**; 61 Winograd tests
-  - [x] `channel_stats_lc_f32_gpu` → `lk_stats_lc_tg` (8 threads per (128-row chunk, channel), threadgroup reduce, same two-pass math; the old one thread per (chunk, channel) walked 128 dependent rows): **Mac GPU app59f 51.8 → 48.4 ms, rand510 295 → 270**; iPhone GPU app59f 66.4 → 64.9 ms, app71m 80.3, s9f 143.2. Winograd agent re-check: fused epilogue stats stay neutral-to-better against it (app59f 48.1-48.8 vs 48.1-48.5; s9f 88.4-93.9 vs 93.8-94.2; rand510 295.5 / 290.9 vs 294.6 / 298.1) → kept
-  - [x] bench_kokoro_gpu.py records the lower median of two full sweeps (reports disagreeing passes) — intermittent outside load had inflated single medians 1.3-2.8×
-  - [x] Investigated: in bench_kokoro_gpu.py's full sweep s6f/s9f read ~87 / ~114 ms vs 69 / 94 ms in short loops. Not case order (s6f 69-70 ms after word / real28 / app47m), not the harness imports, not the dashboard's re-render polling (touching results.json every 2 s: no change); it rose to 80 ms only late in a run → sustained-load effect (minutes of continuous GPU work) with thermal still 'nominal'. References were also measured in long sweeps, so dashboard rows stay like-for-like; sporadic app use (one sentence at a time) is closer to the short-loop numbers
-  - [x] Re-recorded iPhone GPU long cases on a cool phone: s6f 99.0, s9f/m 139.8/134.7, real117 155.8, s20f 336.1, s28f 616.7, rand510 658.8 (fair) ms (before the stats-kernel change)
-  - [x] Lock rule: builds also take the macbench lock (ios_deploy.sh's xcodebuild takes it itself; Mac builds `lk-lock macbench lk-lock build cmake --build`); order phone → macbench → build. Deploys/builds during Mac timing made Kokoro GPU s6f read 70-195 ms (true: 69 ms)
-  - [x] F(2,3) for K=3 (steel-like register use, 0.67× multiplies): built + tested, rejected — iPhone 0.73-1.0× of F(4,3) (worse on every L ≥ 3220), Mac 0.88-1.09×; kept selectable (`wino_weights(w, tile=2)`), unused. K=7 + fused stats: still 8-24 % slower (re-reading outputs from cache instead of registers is worse); register/occupancy cliff of the 2-group kernel, K=7 keeps the separate (now fast) stats pass
-  - [x] CPU-graph test failure `test_free_running_durations_match[app47m]`: caused by Winograd on the F0/N predictor's K = 3 convs (-1 dB via the source phase) and by the w_hh^T LSTM's reordered sums; Winograd now decoder-only (SNR identical to direct), `LOKINFER_KOKORO_LSTM_T` opt-in; all 47 free-running cases + full suite (659) pass
-  - [x] ~~Winograd input-transform fusion into the previous conv~~ — impossible (Snake needs the AdaIN affine of the whole previous output); stats fused instead (round 2)
-  - [x] Winograd for the decoder's K=3 convs and conv_post — done (round 2); per-length K=3 choice dropped (no cheap runtime switch; loss only on word-length K=3 convs)
-  - [x] ResNet 2-D Winograd: point-split for small grids (partial sums atomically added into a zeroed output + epilogue pass; splits until ≥ 100 threadgroups) — per conv Mac N=1 14²×256 1.55×, 7²×512 2.8×; N=8 1.36× / 1.11×; static per-layer choice (Co ≥ 256 only; 56²/28² stay steel) needs no runtime switch. **Mac GPU E2E N=1 2.18 → 1.43 ms, N=8 7.07 → 6.63-6.90 ms**, logits within 3e-6; `models/resnet18.py` patch handed to the coordinator (file owned by another agent); split target needs iPhone validation — **applied to `build_gpu` by the coordinator (2026-11-02): Mac GPU N=1 2.18 → 1.44 ms, N=8 7.07 → 6.41 (torch.compile MPS 6.85: now ahead)**; iPhone check pending (split target tuned on 30 GPU cores)
-  - [x] lokinfer steel GEMM (`gemm_steel_*`, bias/gelu/residual epilogues, transposed B) — slower than MPS on GPT-2's shapes (A/B), so MPS stays the default; kept behind `gemm="steel"`
-  - [x] ~~Fuse the AdaIN+snake prologue into the steel conv loader~~ (superseded: the Winograd input transform now fuses AdaIN+Snake) — decided against for now (2026-11-01): the implicit-GEMM loader reloads each input element once per tap and per 64-column tile (2·K times at Co = 128), so a fused snake recomputes its `sin` 6–22× per element (≈ +20 % conv ALU), vs a separate pass costing ≈ 0.3 ms of bandwidth per conv. Revisit with a tile that stages the transformed input window once in threadgroup memory
-- [x] Mixed CPU/GPU graph (explicit `sync`, verifier-checked) — built; the Kokoro GPU build is mixed by design
-- [x] **(goal)** Beat Kokoro-82M model inference perf vs PyTorch on GPU; **(goal)** E2E vs PyTorch on GPU; beat the best other baseline (MLX / torch.compile) — **apples to apples (exact reference cases, output length verified; `bench_kokoro_baselines.py`), LPM off, 2026-11-01: lokinfer GPU 55 / 133 / 380 ms (real28 / real117 / rand510) vs MLX 74 / 263 / 839, torch.compile MPS 107 / 277 / 879, torch MPS 133 / 366 / 1075** → 1.35× / 2.0× / 2.2× faster than the best baseline. Measured on battery; re-check on AC (dashboard)
-- [x] `docs/kernels/attention.md` **(goal)** — done 2026-11-02: CPU + GPU attention (online softmax, flash, simdgroup-matrix, decode + KV caches), sourced numbers
-
-## M5 — iPhone
-- [x] Targets from M0 (beaten); every kernel benchmarked on the phone through the remote executor (both CPU and GPU): implemented (`kbench run -d iphone-cpu,iphone-gpu --part I/N`, 446 real-shape cases), Mac done; needs iPhone run — complete: every real-shape kernel case benchmarked on the iPhone (CPU 237, GPU 209)
-- [x] ~~GPU: f16 tensor-op conv + GEMM family, f16 weights~~ — superseded: strictly f32 (apples-to-apples rule); an f32 Metal 4 tensor-op experiment is on the Kokoro GPU agent's list
-- [x] CPU: 2-P-core strategy (no multi-stream AMX win), SME2 where it measures faster — closed 2026-11-02: measured (impl-notes/iphone-cpu-sme2.md): one P-core stream saturates the P cluster's SME unit (≈ 2.0 TF/s f32; a second P stream +10-15 %), the E cluster's SME unit runs the same GEMMs ~9× slower, so SME2 GEMMs run on the P cores only and the E cores do transforms / epilogues (Winograd P/E pipeline, polyphase convT); SME2 is used where it measured faster (Winograd + convT GEMMs, LSTM gemvT), Accelerate elsewhere (ALBERT: SME2 0.19 vs Accelerate 0.12 ms)
-- [x] Memory: mmapped constants, no copies — done (M0); f16 weights superseded (f32 rule); **peak memory measured per model on Mac + iPhone (runtime agent, 2026-11-02; `bench/models/measure_memory.py`, fresh executor per model, table in docs/runtime.md): Kokoro footprint CPU app59f 166 / 542 (steady 96) MiB, s28f 834 / 815; GPU app59f 134 / 138, s28f 318 / 329 (Mac / iPhone); weights never count (mmapped); other models ≤ 22 MiB**
-- [x] Run the Python graph suite against the phone via a pytest device parameter; on-device reference sweeps (basic kernels as oracle, seed-generated inputs) — runtime agent 2026-11-02: `pytest --device=iphone|serve` (`tests/conftest.py`: every compiled graph runs remotely, device outputs are what tests assert, tests that ran nothing remotely report skipped), validated with `--device=serve` (128 graph tests + Kokoro app59f CPU/GPU stage/E2E tests pass through the remote path); `tests/python/test_device_sweeps.py` (26 sweeps: fused MobileNetV2 block vs basic convs, GPU dwconv / gemm_bias vs CPU basics, inputs generated + compared on the device); **on the iPhone: 62 passed / 1 skipped (sweeps, remote, MobileNetV2, MNIST, GPU dwconv) + Kokoro app59f 5 passed**
-- [x] Efficient reference-data transfer (content-addressed cache) — runtime agent 2026-11-02: RUN2 + `RemoteDevice.put_tensor` (inputs / references stored by sha256 on the device, sent once per content), device-generated inputs (`Generated`, numpy mirror `generate`), on-device comparisons returning only statistics; tested against lokinfer-serve and on the iPhone
-- [x] Same Kokoro goals on the phone (CPU + GPU) against the M0 targets — beaten on every case (sub-items; dashboard)
-  - [x] iPhone references measured (ExecuTorch XNNPACK CPU, MLX Swift GPU; `docs/impl-notes/iphone-baselines.md`); lokinfer iPhone CPU beats both (rand510 1230 ms vs ExecuTorch 2682 / MLX Swift 1630)
-  - [x] lokinfer GPU graph runs on the iPhone (LokiHost has the increased-memory-limit entitlement): real28 68 ms, real117 248 ms (MLX Swift 517)
-  - [x] `bench/models/bench_remote_models.py`: every model's CPU + GPU graph on the iPhone through the remote executor, recorded to the dashboard (coverage rule: every model has Mac CPU / Mac GPU / iPhone CPU / iPhone GPU cards)
-
-## M6 — The rest of the original plan
-- [x] CPU runtime variants the plan asks for (mono-thread vs thread pool vs P-core-pinned QoS) and their comparison on MNIST/MobileNetV2/Kokoro — Mac (2026-11-02): mono / pool default QoS / pool P-core QoS = MNIST B=64 0.161 / 0.165 / 0.161 ms, MobileNetV2 4.01 / 1.69 / 1.59 ms, Kokoro app59f 279 / 114 / 114 ms (`benchmarking.md` "CPU runtime variants"); iPhone: needs iPhone run (`runtime_variants.py --iphone`) — **iPhone (2026-11-02, thermal serious)**: mono 0.124 / 2.46 / 225 ms (MNIST B=64 / MobileNetV2 N=1 / Kokoro app59f), pool default QoS 0.049 / 1.66 / 138, pool P-core QoS (shipped) 0.068 / 1.66 / 166 → the QoS difference on Kokoro (138 vs 166) needs a nominal-thermal interleaved re-check before changing the default (handed to the Kokoro iPhone CPU agent) — iPhone (2026-11-03, nominal): mono 0.120 / 2.05 / 141.4 ms, pool default QoS 0.048 / 1.65 / 101.3, pool P-core QoS (shipped) 0.069 / 1.61 / 103.2 (MNIST B=64 / MobileNetV2 N=1 / Kokoro app59f) → pool 1.24-2.5× over mono; default QoS ~2 % better on Kokoro in one run (follow-up A/B before changing the shipped QoS)
-- [x] GPU record/replay (ICB) as an init-time strategy + comparison (runtime agent, 2026-11-02): `src/runtime/gpu_replay.*`, opt-in `LOKINFER_GPU_REPLAY=1`; tee-recorded first call per input-shape signature, per-call argument patching, bit-identical to direct (unit tests); **MobileNetV2 GPU N=1: Mac replay 1.152 ms vs direct 1.117-1.128 (+3 %), iPhone 1.048 vs 1.008 (+4 %) → stays opt-in** (GPU-bound; ICB chains run slower). Deferred buffer release: done earlier
-  - [x] Fixed per-call GPU cost: the blocking `waitUntilSignaledValue` cost ~180 µs of wake-up latency; spin on `signaledValue()` for up to 2 ms first (1-kernel graph: 127 → 102 µs per call on the M2 Max; the remaining ~75 µs is the GPU's submit-to-complete latency)
-- [x] Thread pool size: P-cores, plus the E-cores on chips with < 4 P-cores (iPhone 2 P + 4 E: 6 workers, as measured best by the M2 conv proof and ExecuTorch; Mac 8 P + 4 E stays at 8)
-- [x] ~~Data-dependent dims: GPU-driven variant~~ — superseded: `F` is computed on the CPU (no readback to avoid)
-- [x] Compiler (2026-11-02): pipeline 5.1 → 0.92 ms incl. per-pass verification (3,800-op synthetic graph, Release M2 Max); `mem.plan` cache keyed by symbol values (8/plan) + one shared arena per pool (CPU / gpu_only) + element-unit offsets; `bake-init` (`rt::bakeInit`, `model.bake_init()`, `save(bake_init=True)`); `lokinfer-opt --stats` (per-pass time, op counts, arena vs max-live lower bound); `dce` done earlier; dim programs not built: memoized per-call `DimEvaluator` instead (dim eval measured ~4 % of the symbolic per-call overhead). Tests: `[memplan]`, `[bake]`, rewriteOps unit tests, lit `plan_memory/{gpu_only_pool*,stats}`, `bufferize/gpu_only` (docs/compiler.md)
-- [x] Python (2026-11-02): `submit()/wait()` (per-model worker thread), `model(x, out=y)` (computed into caller memory, no copy; GPU wraps CPU memory), `internalize()`, MPS zero-copy both ways (`from_torch(mps)`, `Tensor.torch(device="mps")` via DLPack kDLMetal; GPU model reads/writes MPS tensors): `tests/python/test_call_api.py` (docs/python-api.md)
-- [x] Profiling workflow (xctrace CLI captures, both devices): `docs/profiling.md` + `prof-lokinfer` / `prof-torch` / `mlogs-viewer` (linked from `docs/benchmarking.md`)
-- [x] `docs/correctness-testing.md` **(goal)** (methodology written; levels marked built/planned)
-- [x] Baselines for the other models (ResNet-18, MobileNetV2, DCGAN G/D, GPT-2: torch eager/tuned/compile CPU, torch MPS/compile MPS, MLX; `bench/models/bench_other_baselines.py`, table in `research-models.md` §8; ONNX Runtime not measured)
-- [x] **(goal)** ResNet-18, DCGAN G/D, GPT-2 124M, MobileNetV2 ports, each with its `docs/models/*.md`, at the depth decided in M0 (MobileNetV2 is the runtime-overhead case: record/replay payoff)
-  - [x] ResNet-18 CPU + GPU (`models/resnet18.py`, `docs/models/resnet18.md`): NHWC, BN folded, conv2d with bias/residual/act epilogues (CPU im2col tiles + Accelerate on the pool; GPU steel conv2d); matches torchvision < 1e-4 at 5 sizes incl. odd/non-square
-  - [x] MobileNetV2 CPU + GPU (`models/mobilenet_v2.py`, `docs/models/mobilenet_v2.md`): + depthwise conv (CPU NEON, GPU direct), ReLU6 epilogues, residual without activation, GPU channel padding to 16; matches torchvision < 1e-4
-  - [x] DCGAN G/D CPU + GPU (`models/dcgan.py`, `docs/models/dcgan.md`): G layer 1 as GEMM, ConvTranspose2d as GEMM + overlap-add gather (+bias, ReLU/tanh), D convs with a LeakyReLU epilogue + GEMV + sigmoid; matches PyTorch at B 1/3/64 incl. D(G(z))
-  - [x] GPT-2 124M prefill CPU + GPU (`models/gpt2.py`, `docs/models/gpt2.md`): fused-QKV causal attention, tied LM head as a transposed-B GEMM (no copy), GPU add+LN with two outputs; matches HF logits at T 1…1024
-  - [x] GPT-2 decode step with persistent KV caches (`lk.persistent_buffer` + `inout` kernels: new IR/compiler/runtime support, lit test `pipeline/persistent.lkir`) — greedy generation matches HF `generate` token for token (CPU and GPU)
-  - [x] Prefill that fills the decode caches: `build_generate` — one compiled model with chunked prefill/decode (ids `i64[T]` + start pos), `kv_write_rows` / `attention_cache` / `arange_offset` kernels (CPU + GPU); greedy generation matches HF token for token
-- [x] MNIST leftovers (2026-11-02, Mac): NEON GEMM for large M on the pool (convnets agent) — `cpu` variant B=64 0.164 → 0.045 ms, B=1024 2.65 → 0.53 ms; Accelerate stays fastest (0.0036 / 0.020 / 0.209 ms vs torch CPU 0.020 / 0.042 / 0.345); GPU 0.139 / 0.137 / 0.150 ms (torch MPS 0.29 / 0.34 / 0.38); re-bench out of LPM done (dashboard)
-- [x] GPU `gemm_bias[_relu]_f32_gpu` (2026-11-01, found with prof-lokinfer: 784->128 at M = 1 took 192 us on 4 threadgroups): M <= 8 -> split-K small-M kernel (`gemm.metal`), M > 8 -> steel (1.2-1.9x the old 32x32 kernel); Mac MNIST GPU (dashboard) B=1/64/1024 = 0.205/0.257/0.152 ms (torch MPS 0.306/0.430/0.390); iPhone: B=1 0.27 → 0.13-0.14 ms, B=64 0.37 → 0.09-0.28 (noisy) — steel up to M = 256, the 32×32 tiled kernel above (steel was slower there on the phone: B=1024 0.49 vs 0.43); B=1024 still behind MLX Swift (0.43-0.68 ms, very noisy run to run, vs 0.26); iOS small-grid threshold 32 tried, no gain; small-M kernel extended to row blocks (any M) but it loses from M = 16 (Mac) / at M = 64 (iPhone), so the threshold stays 8; the 32×32 tiled bias kernels stay for the iPhone at M > 256; `tests/kernels/test_gemm_bias_gpu.py`
-- [x] DCGAN: D's last layer as a one-column GEMV + sigmoid kernel on the GPU (`gemv1_bias_f32_gpu`, 1.5 ms → µs; D GPU now ≈ MLX), G's ConvTranspose gather parallelized by pixels + vvtanhf (CPU N=64 19.7 → 11–12.6 ms)
-- [x] ResNet-18 GPU stem as im2col + steel GEMM (K 147→160 instead of channels padded to 16: K 784)
-- [x] iPhone references for every model on both devices (ExecuTorch XNNPACK CPU, MLX Swift GPU in true f32 — `MLX_ENABLE_TF32=0`; `docs/impl-notes/iphone-baselines.md`, `docs/baselines.md`)
 - [~] iPhone gaps vs ExecuTorch / MLX Swift (CPU small models: MobileNetV2, ResNet-18, DCGAN D N=1, MNIST; GPU fixed per-call latency)
-  - [x] iPhone CPU convnets (agent, 2026-11-01, finished): iPhone CPU MobileNetV2 N=1 3.54 → 1.61-1.69 ms (ExecuTorch 1.49), N=8 20.1 → 8.5 (7.92); ResNet-18 N=1 6.58 → 4.16 (2.93), N=8 36.4 → 23.4 (18.67); DCGAN D N=1 0.21 (0.19), **N=64 10.0 (10.66, now ahead)**; Mac CPU MobileNetV2 4.03 → 1.52 / 18.7 → 6.85, ResNet-18 6.41 → 4.32 / 25.1 → 20.1. Specialized 3×3 depthwise (no register spills), conv tile/channel splitting (~3 tasks/thread), Accelerate-threaded / 2-way K-split for long-K small-map convs, fused MobileNetV2 block `mbv2_block_nhwc[_res]_f32_cpu` (expand → dw → project, cache-resident), row-copy im2col, NEON maxpool + NCHW→NHWC, lock-free pool hand-off (12 → 4-6 µs per parallelFor; TSan-clean), `ThreadPool::park()`. Reverted: longer spins, task caps 2/6, whole-conv Accelerate threading, serial pointwise, 6-way K split, pre-transposed weights
-  - [x] iPhone CPU ResNet-18 (2026-11-03): planar `build_cnhw` with Winograd F(2x2, 3x3) (`conv2d_wino_cnhw`, SME2 GEMMs pipelined with E-core transforms; run-time choice vs direct), power-of-2 plane padding (was 5x slow), per-geometry mask cache, vectorized/serial phase ops (cross-cluster: P-core-written planes feed SME faster), 1x1 plain B — recorded **N=1 2.88 ms (ExecuTorch 2.93, ahead), N=8 18.96 (18.67, 1.6 % behind; 18.3-18.6 in profiled runs)**; tried and dropped: F(4x4, 3x3), Accelerate grid for planar convs (2-2.5x slower), stem gather pipeline, E-core SME (≈0.19 TF/s; P cluster caps ~1.8 TF/s for any number of streams, measured `[.sme2cluster]`). Remaining N=8 gap: deferred (user, 2026-11-03)
-  - [x] MobileNetV2 (2026-11-03): direct NEON stem straight from NCHW (`conv2d_smallci_nchw`, N=8 −0.2 ms, N=1 ≈ −0.04); SME2 single-stream small-map blocks/pointwise tried and dropped (N=1 1.62 → 1.99); recorded N=1 1.61 / N=8 8.58 ms vs ExecuTorch 1.49 / 7.92 — deferred (user, 2026-11-03). DCGAN D N=1: direct stem slower there (0.275 vs 0.203, off), `LOKINFER_SME2=1` slower (0.226 vs 0.179); recorded 0.28 (session noise, 0.18-0.20 in A/B runs) vs 0.19 — deferred (user, 2026-11-03)
-  - [x] `prof-lokinfer trace -d iphone-cpu -t time` failed (xctrace exit 21 "Cannot find process for provided pid"): on that error the tool now re-records with `--all-processes` on the device and the summary keeps LokiHost by name — verified on the iPhone (MNIST: `gemm_bias_relu_f32` 72 % of samples)
-  - [x] prof-lokinfer's phone-busy check only counts a Python process actually running bench_remote_models.py (lk-lock / shell wrappers waiting for the phone lock no longer block it)
-  - [x] GPT-2 GPU Mac + iPhone (agent, 2026-11-01): **best on all 6 cases** — Mac prefill T=128 5.45 ms (MLX 5.65), T=512 15.69 (torch.compile MPS 18.7), decode 2.03 (3.21); iPhone T=128 11.45 (MLX Swift 12.75), T=512 39.24 (41.8), decode 5.57 (6.0). Simdgroup-matrix flash attention `lk_attention_qkv_sg` (fully unrolled; T=512 attention 6.4 → 1.36 ms), fused decode attention + KV write, `gemv4` with per-platform tile width; `prof-lokinfer run gpt2_decode`; details in docs/models/gpt2.md
-  - [x] GPT-2 / MNIST CPU + generate (agent, 2026-11-01, finished): **iPhone CPU GPT-2 now 1.16× / 2.19× / 1.59× vs ExecuTorch** (prefill T=128 23.16 ms, T=512 75.06, decode 5.46); Mac CPU 26.3 / 69.5 / 7.9 ms; Mac GPU prefill T=128 5.45 → 4.99 (MLX 5.65) via split-K for the N=768 GEMMs with the partial sums folded into the next add+LN (MPS above 48 tiles; MPS on the iPhone); fused bias+gelu epilogues, residual+bias+LN fusion, iPhone 4-row-block single-threaded Accelerate GEMMs, causal attention skipping the masked half + NEON softmax, decode GEMV row split; `build_generate` GPU decode step 6.0 → 2.05 ms (per-call kernel choice on symbolic T). Generic iPhone Accelerate GEMMs (M ≥ 16, N ≥ 512, ≥ 50 MFLOP): 2 single-threaded row blocks (ALBERT-like T=59 11.0 → 8.9 ms); real Kokoro iPhone CPU unchanged within noise (app59f 170 ms vs 164-175 before; ALBERT GEMMs are ~10 ms of it). MNIST iPhone CPU stays ~1.09× (Accelerate limit; needs a different GEMM engine)
-  - [x] GPT-2 `build_generate` GPU: later prefill chunks (pos > 0) now on the simdgroup-matrix flash kernel reading K/V from the cache (`lk_attention_cache_sg`, shared body with `lk_attention_qkv_sg`): Mac chunk T=128@384 10.1 → 6.6 ms, T=16@496 7.7 → 3.75 ms; new `test_gpt2_generate_multi_chunk_prefill_gpu` + kernel tests (2026-11-02; needs iPhone validation)
-  - [x] Split-K for other underfilled N = 768 GEMMs on the Mac GPU: `build_generate`'s two projections for T > 1 (`gemm_auto_sk`: M = 1 → gemv4 plane, else split-K / MPS): gen prefill T=128 6.1 → 5.07 ms, chunk T=16 3.95 → 3.75; build()'s T=512 re-check (forced split-K 17.8-19.0 vs MPS 17.2-17.5) keeps the 48-tile threshold (2026-11-02; needs iPhone validation)
-  - [x] Mac decode attention key split (`attention_decode_split`, single-dispatch combine via atomic counter): only pays for long contexts (P=1000 2.23-2.29 → 2.17-2.25 ms/step; P=512 tie 2.02; P=16 +0.05), so auto = kvw below 768 keys, 4 splits × 16 simdgroups above; the ~0.2 ms estimate was per-dispatch profiler overhead (M2 Max has 30 GPU cores, not 38) (2026-11-02; iPhone stays kvw, needs iPhone validation)
-  - [x] Re-checked the "slower than MPS" verdicts (Mac GPU): steel loops are already unrolled and steel still loses (T=128 6.2-6.7 vs 4.9-5.8 ms, T=512 18.8-19.0 vs 17.2-17.5); LM head `gemv_rows` ties MPS (2.03 ms step); `lk_gemv` / `lk_attention_decode` superseded by unrolled gemv4 / kvw — MPS kept everywhere (2026-11-02; iPhone not re-checked, needs iPhone validation)
-  - [x] GPU AdaIN affine: one simdgroup per channel (lanes split the chunk partials, Kahan per lane + `simd_sum`) instead of one thread walking all chunks: Kokoro Mac GPU rand510 361 → 351 ms (AdaIN was 12.4 ms)
-  - [x] Kokoro ALBERT attention on the GPU now uses `lk_attention_qkv_sg` (was ~10 ms of rand510 on the Mac, now below the profile's top 12); Mac Kokoro GPU recorded 46 / 124 / 380 ms (on battery) via the new `bench/models/bench_kokoro_gpu.py`
-  - [x] GPU depthwise 3×3 (`lk_dwconv2d_nhwc_k3s{1,2}c4`, 2026-11-01, found with prof-lokinfer: depthwise was 45 % of MobileNetV2 N=8): float4 channels × 4 output columns per thread, stride as a template parameter (a runtime-stride version spilled and was slower); depthwise N=8 2.4 → 0.55 ms; **Mac GPU MobileNetV2 N=1 1.42 → 1.10 ms, N=8 5.30 → 3.15 ms (MLX 1.76 / 4.50)** (with the NCHW→NHWC change below); `tests/kernels/test_dwconv_gpu.py`; **iPhone GPU MobileNetV2 N=1 1.61 → 1.04 ms, N=8 11.05 → 6.19 ms**
-  - [x] Stem im2col tiled (`lk_im2col_nchw_tile`, 2026-11-01, prof-lokinfer: 15.6 % of ResNet-18 N=8 at ~50 GB/s): input patch staged in threadgroup memory, per-column offset table, no division per element → N=8 1.22 → 0.37 ms, N=1 0.157 → 0.048 ms; **Mac GPU ResNet-18 N=1 2.30 → 2.19 ms, N=8 7.73 → 7.06 ms (MLX 2.92 / 7.44; N=8 was behind)**
-  - [x] `nchw_to_nhwc_pad` one thread per pixel (coalesced plane reads, float4 stores): MobileNetV2 N=8 0.263 → 0.080 ms; DCGAN D Mac GPU 0.53 / 3.07 ms (MLX 1.10 / 3.23)
-  - [x] DCGAN D GPU first conv = im2col from NCHW (K = 48) + 1×1 steel conv with the leaky epilogue, instead of padding 3 → 16 channels (K = 256; it was 1.25 of 6.6 ms on the iPhone at N=64): Mac N=64 3.07 → 2.84 ms (MLX 3.23); **iPhone N=64 6.64 → 6.01 ms (MLX Swift 6.16)**, N=1 0.35 ms
-  - [x] perfdb: a throttled measurement now replaces a nominal one when it is faster (throttling only slows down; GPT-2 iPhone GPU decode 5.57 ms had been discarded in favor of an older 7.19; now recorded 5.58 ms vs MLX Swift 6.01)
-  - [x] ResNet-18 iPhone GPU now ahead: 2.50 ms N=1 (MLX Swift 2.70), 13.82 ms N=8 (14.31), after the im2col and depthwise/NHWC work
-  - [x] ResNet-18 iPhone GPU (history): 3.23 → 2.72 ms N=1 (MLX Swift 2.70), 19.4 → 15.0 ms N=8 (14.3); profile: convs 72 %, im2col stem 8 %
-- [x] **Kokoro representative shapes (user request 2026-11-01)**: measured the real workload (app TTS pack: T 34-83, median 59; F 98-224, median 161; two app voices af_heart / am_echo, am_echo +8-16 % frames; F varies ~1.6× across the 28 English voices). New cases `word`, `app{47,59,71}{f,m}` (+ `app59_{nicole,emma,fenrir}` for correctness), 26 new tests pass (exact durations, SNR CPU+GPU, stages on app59f/m); dashboard Kokoro charts now have 10 cases; prof-lokinfer default case `app59f`; docs/models/kokoro.md "Representative shapes"
-  - [x] Longer utterances (user, 2026-11-01: shadowing moving toward 5-10 s, occasional 20-60 s+ TTS = chunked ≤ 510-token forwards): cases `s6{f,m}`, `s9{f,m}`, `s20{f,m}`, `s28f` (real-text near-max chunk); 17 new tests pass; dashboard Kokoro charts now 16 cases; lokinfer Mac GPU s6f/m 72.4/74.8, s9f/m 100.0/98.8, s20f 221.2, s28f 323.7 ms. References on all 6 (agent, done): best Mac GPU = MLX Swift (s6f 175.9, s28f 774.9 → lokinfer 2.4×), Mac CPU = torch.compile (498.3 / 1908.7 vs lokinfer fused 236.1 / 1091.3 → 2.1× / 1.75×), iPhone GPU = MLX Swift (354.3 / 1632.8 vs 110.4 / 764.9-hot → 3.2× / 2.1×), iPhone CPU = ExecuTorch (449.8 / 2619.2) vs lokinfer s6f 259.1, s9f 381.0, s20f 1169.8 (serious), s28f 1546.1 (serious) → 1.55-1.78×
-  - [x] references on the 7 workload cases, all devices (agent): app59f best refs Mac GPU MLX 108.4, Mac CPU torch.compile 324.2, iPhone GPU MLX Swift 210.3, iPhone CPU ExecuTorch 288.9 ms vs lokinfer 54.8 / 151 / 102.3 / 174.9 (≈ 2.0× / 2.1× / 2.1× / 1.65×); reference harnesses moved to the time-based protocol
-  - [x] references (torch eager / compile / MPS / compile MPS, MLX, MLX Swift Mac+iPhone, ExecuTorch Mac+iPhone) on the new cases (agent); lokinfer iPhone CPU/GPU on the new cases (queued); lokinfer Mac GPU recorded (first): word 31.6, app47f/m 53.3/57.9, app59f/m 62.4/65.8, app71f/m 70.1/87.7 ms
-  - [x] Workload profile (Mac GPU app59f, prof-lokinfer timeline): a 13.2 ms GPU-idle window where the CPU ran the 5 LSTMs (7 ms), the F0/N predictor convs (3.7 ms) and the TextEncoder; the app71m "cliff" was bench noise (profile 64-72 ms)
-  - [x] GPU build: F0/N predictor on the GPU (`f0n_gpu`, AdainResBlk1d with identity shortcuts), emitted before the CPU TextEncoder and synced after it so both overlap; iSTFT on the GPU straight from conv_post's channel-last output (`istft_logits_lc_f32_gpu`, test vs the CPU kernel) — **Mac GPU app59f 62.4 → 54.8 ms, word 31.6 → 29.0, real117 126.7 → 110.3, rand510 379.8 → 302.8**; iPhone re-bench pending
-  - [x] Tried: LSTM direction split over 2 cores per direction with a per-step spin barrier — 10.4 → 8.1 µs/step standalone but slower in the kernel (T=147 1.52 → 1.88 ms); reverted (note in kokoro_lstm.cpp)
-  - [x] Mac CPU app59f profile (TF/s fixed for channel-first CPU convs): generator snake convs 96 of 150 ms at 1.81 TF/s (≈ AMX ceiling); ALBERT GEMMs 0.6-0.93 TF/s. Fused QKV GEMM on the CPU (3 → 1 per layer) + GELU on the pool: 150 → 148 ms
-  - [x] (closed: the gemm.cpp owner found no blocking beating multithreaded Accelerate in-model on the Mac — best 16 column blocks ≈ 1 % E2E; iPhone uses 2 single-threaded row blocks; park() kept) Multi-threaded Accelerate GEMMs run ~1.7-2× slower inside the model than alone (QKV 224 vs 112 µs). `ThreadPool::park()` (CPU agent) before MT BLAS is in (kokoro_common.h, gemm.cpp) but didn't change Kokoro (148.4 ms; standalone it helps 168 → 120 µs after a parallelFor) — likely Accelerate's own threads re-waking between short kernels; autoSplit tuning for M ≈ 40-150 handed to the gemm.cpp owner
-  - [x] iPhone app59f profiles (2026-11-01 evening): GPU 70.1 ms (was 102; the Winograd agent's `wino_*` kernels are in the model's GPU path) vs MLX Swift 210.3; CPU 164.0 ms vs ExecuTorch 288.9 — snake convs 125 of 164 ms at 1.40 TF/s vs 1.44-2.08 TF/s measured in the M2 conv proof (6 streams) → CPU conv tiling on the phone and/or CPU Winograd are the iPhone CPU levers
-  - [x] Kokoro iPhone CPU conv throughput (agent, 2026-11-02): CPU Winograd (F(4,3) / nested F(4,4)) with a custom SME2 GEMM tile kernel, P/E-cluster pipeline (GEMMs on P cores, transforms on E cores), two-phase mode for short sequences, decoder leaky Winograd; iPhone CPU app59f 153 → 96.8 ms (prof), dashboard s28f 951.8 (was ~1546), rand510 1001.8 (1230); Mac CPU app59f 152 → 122 ms. docs/impl-notes/iphone-cpu-sme2.md
-  - [x] Remaining GPU-idle window at app59f ≈ 8 ms = the duration-encoder LSTMs + shared LSTM (latency-bound: ~10-12 µs/step, sgemv 1 MB of w_hh per step from L2); ideas: overlap the TextEncoder LSTM with a duration LSTM (independent), pack w_hh per core at prepare time — 2026-11-02 (CPU agent): CPU build: TextEncoder BiLSTM concurrent with the first duration BiLSTM (`lstm_bidir2`; Mac −0.7 ms, iPhone sequential fallback neutral); GPU build unchanged (its TextEncoder already overlaps F0/N on the GPU). Accurate w_hh^T LSTM: 4 partial sums per gate (NEON == SME2 bit for bit) passes all 26 free-running SNR cases (app47m 37.9 dB) but is not faster on either device (iPhone app59f 98.4/101.0 vs 98.0/99.6 ms) → stays opt-in `LOKINFER_KOKORO_LSTM_T=1` (impl-notes/iphone-cpu-sme2.md "Round 3")
-  - [x] Kokoro CPU agent round (2026-11-02): SME2 conv (`sme2_conv.*`, pre-packed weights, no im2col), CPU Winograd convs (decoder + generator resblocks; not the F0/N predictor: −1 dB SNR there), P-core GEMM / E-core transform pipeline (1 P-core saturates the P-cluster SME unit at ~2 TF/s; E-cluster SME ~9× slower), short-sequence mode. **iPhone CPU app59f 153 → 96.8 ms (dashboard sweep 106.1), s6f 259 → 174.6, s9f 381 → 261.6, s20f 1170 → 718.4, s28f ~1546 → 951.8, rand510 1230 → 1001.8; Mac CPU app59f 152 → 122.3, s9f 292 → 257**; app47m SNR failure fixed; transposed-w_hh LSTM built but off (`LOKINFER_KOKORO_LSTM_T=1`; app47m SNR 36.1 < 37.5). Remaining Kokoro CPU items → fresh Kokoro CPU agent (2026-11-02)
-  - [x] prof-lokinfer: Winograd ops excluded from TF/s (their transformed weights overstated work ~2×)
-- [x] Mac AMX multi-stream headroom (bench agent, LPM off): 6 single-threaded streams 4.70 TF/s vs Accelerate threading 2.73 on 512×768×768; Kokoro conv tile 3.89 vs 2.20 — in-model Kokoro Mac CPU convs run ~1.8 TF/s → handed to the Kokoro CPU agent — closed: the Kokoro CPU agent's Mac sampling shows the remaining Mac conv cost is the Winograd transforms, not the stream count (Winograd tiles 256-2048 / repacked full-height GEMM: no gain)
-- [x] Docs-audit fixes (2026-11-02, coordinator): verifier carries init-result residency into exec state (a CPU read of hoisted GPU state is now rejected after passes / .lkm loads; lit `verify/state_residency_rejected.lkir`); GPU LayerNorm kernels report C > 2048 via ctx.error (was enforced only in Python); stale T ≤ 1024 rule on `attention_qkv_f32_gpu` removed (flash kernel has no limit); dead `lk_stats_lc` kernel removed; stale comments/docs fixed (kokoro_lc header/comments, ALBERT fused QKV, MNIST GPU, snake vvsinf, todo facts); owners asked to fix theirs (30-core GPU not 38, iPhone 18 Pro Max naming, istft bins check, per-device pool threshold, gpu_only lit test, --stats lower bound, Winograd speedup wording, TEMP env switch)
-- [x] m2-conv-proof.md table rows re-run exactly (bench agent, `results_conv1d_cpu_m2table.json`): tiled 8-stream winner 22.1 ms (2.15 TF/s) stage-1 k11 d5, 11.2 ms (1.81 TF/s) stage-0 k7 d3; doc and data agree
-- [x] iPhone off-limits while unavailable (2026-11-02): `/tmp/lokinfer-phone-disabled` makes `scripts/ios_deploy.sh` and `RemoteDevice` refuse; all work Mac-only; iPhone runs deferred as "needs iPhone validation"
-- [x] Runtime agent (2026-11-02): GPU record/replay (ICB) built, opt-in (`LOKINFER_GPU_REPLAY=1`; MobileNetV2 +3-4 % slower: GPU-bound); 2 command buffers in flight now default (Kokoro app59f Mac 50.7 → 50.1, iPhone 65.1 → 64.7 ms; GPT-2 Mac GPU checked unchanged: 4.94 / 16.2 / 2.05 ms); remote-protocol fuzzing found + fixed 4 server bugs; `pytest --device=iphone|serve`; content-addressed test data on the phone; peak memory per model in docs/runtime.md. Note: measure GPU time/memory with Release builds only (Debug metallib is -O0)
-- [x] GPU replay slowdown investigated (user: "how can it make it slower", 2026-11-02): GPU executes the ICB ~5.5 % slower per call (≈1 µs/command), not pipelines (ICB-flag PSOs in the direct path: no change), not barriers or ICB layout (`optimizeIndirectCommandBuffer`, barrier-free: no gain) → replay stays opt-in. Found the real lever: **early commit** (first 2 GPU kernels committed immediately, GPU starts while the CPU encodes the rest) — now default: Mac GPU MNIST B=1 0.262 → 0.216 ms, GPT-2 decode 2.10 → 2.04, T=128 5.21 → 4.90, MobileNetV2 1.106 → 1.088, Kokoro unchanged; iPhone A/B (on/off/on): GPT-2 T=128 11.44 → 11.30, MNIST B=1024 0.68 → 0.66, but MNIST B=1 (3 kernels) 0.15 → 0.17 → on iOS only graphs with ≥ 8 GPU kernels commit early (`kEarlyMinKernels`); iPhone GPU rows re-recorded (docs/runtime.md)
-- [x] iOS GPU in-flight default 1 → 2 (coordinator, 2026-11-02, after the runtime agent's slot-reuse fix): interleaved A/B ×2 with early commit — GPT-2 prefill T=128 11.44 → 11.29 / 11.30 ms (no bimodality), decode 5.58 → 5.56, Kokoro app59f 65.3 → 64.6; early commit now requires ≥ 2 segments (`maxSegments`)
-- [x] Flaky device test (`EXIT_CODE=42` = Catch2 assertion failure): not reproduced (5 device runs + 24 contended Mac runs pass); hardened the only timing assertion (`pipeline: Kokoro-sized graph compiles fast`: best of 3 runs) and `scripts/ios_deploy.sh` now keeps a failing run's console (`build/ios-console-fail-*.log`) + prints its failed assertions. Also seen: LokiHost's serial accept loop wedges when a client vanishes mid-session (connections reset until `lokihost.sh restore`) — runtime owner
-- [x] MNIST iPhone GPU B=1024 varies 0.43 → 0.66-0.68 ms across sessions (GEMMs 0.53 ms at 0.42 TF/s, tiled 32×32 path); B=64 0.09 → 0.19 — likely GPU DVFS on tiny bursts; MLX Swift 0.26 / 0.14. Lowest priority (other-models round): try steel 64×64 / MPS on the phone, warm-up policy — 2026-11-02 (MNIST GPU agent): iPhone GPU B=1/64/1024 0.152/0.189/0.41-0.68 → **0.138/0.154/0.257 ms (MLX Swift 0.139/0.144/0.264: B=1 + B=1024 ahead, B=64 still behind)** via single-dispatch split-K gemm_bias (last split applies the epilogue), a BK=32 tiled kernel for big M on the iPhone, and the remote executor no longer copying inputs per timed call (3.2 MB at B=1024); MPS / 64×64 / fused 3-layer MLP measured slower; the rest is per-call GPU latency, bimodal (docs/models/mnist-mlp.md)
-- [x] Kokoro CPU agent round 2 (2026-11-02): all 11 items closed — polyphase convT (Mac 5.45 → 1.89 ms, iPhone 4.49 → 3.14), Winograd conv_post (Mac 2.56 → 0.50), SME2 64×16 tail blocks, LSTM pairing (Mac −0.7 ms), accurate transposed LSTM (opt-in: not faster), vectorized harmonic/STFT/iSTFT (iPhone 2.71 → 0.78, 1.89 → 0.58), shared neon_math.h, composition tests, sme2_conv → sme2_gemm merge. **Mac CPU app59f 122.3 → 106.6 ms, s9f 256.9 → 230.1; iPhone s28f 951.8 → 911.9, rand510 1001.8 → 972.5** (app59f flat within session noise); fused ALBERT epilogues reverted (iPhone −1.4-2.8 ms)
-- [x] Dashboard: "lokinfer #1 in X / Y configurations" per model title + totals overall and per device at the top (user, 2026-11-02; docs/perf-dashboard.md). Now: 113 / 120 (Mac CPU 30/30, Mac GPU 30/30, iPhone CPU 25/30, iPhone GPU 28/30)
-- [x] prof-lokinfer: TF/s per GEMM / GEMV / conv kernel and shape (CLI + report), so ceiling checks are one glance (`docs/profiling.md`)
-- [x] Benchmark hygiene (2026-11-01): `scripts/lk-lock` (macOS has no `flock(1)`) serializes build / Mac bench / iPhone sessions between concurrent sessions (`docs/benchmarking.md`); the iPhone sweep runs GPU variants before CPU per model (the long CPU runs had heated the phone: Kokoro GPU real117 310 vs 242 ms); iPhone Kokoro GPU now 67 / 243 / 750 ms nominal
-  - [x] On-device profiling: relaunch LokiHost with `DEVICECTL_CHILD_LOKINFER_PROFILE=2` (devicectl forwards the env), run `bench_remote_models.py --no-record`, read the console log
-  - [x] Register-blocked NEON depthwise conv (weights in registers per 8-channel block, interior fast path): Mac MobileNetV2 CPU 6.4 → 4.1 ms; iPhone 4.2 → 3.8 ms (112×112×32 dw layer 0.61 → 0.12 ms); small-Ci im2col copy loop
-  - [x] Tried and reverted: pool spin 250 µs and a 1M-MAC inline threshold for depthwise (both slower on the iPhone)
   - [~] (deferred (user, 2026-11-03): MobileNetV2 N=1 1.61 / N=8 8.58 ms vs 1.49 / 7.92, DCGAN D N=1 0.18-0.28 vs 0.19, ResNet-18 N=8 18.96 vs 18.67) The remaining iPhone CPU gap on small convnets is spread over ~35 kernels of 50-100 µs. NOT the GEMM math: single-threaded Accelerate (AMX) runs MobileNetV2's pointwise shapes (K = 16-144) at 500-1000 GFLOP/s on the M2 Max (microbench 2026-11-01), so a NEON micro-kernel would be slower. Suspects: per-kernel fixed costs (pool hand-off, im2col/epilogue passes), memory traffic between unfused dw/pw layers; profile per-kernel time vs FLOPs on the phone before changing anything
-- [x] Kokoro e2e quality validation vs english-practice (step 1 of the app's TTS transition; e2e agent, 2026-11-03): `tests/e2e/kokoro/` (README there; output in git-ignored `e2e-runs/kokoro/<run>/`). 225 texts (words → 80 s multi-chunk paragraphs, edge cases; 10 voices, ~70 % af_heart/am_echo), the app's exact preprocessing (KPipeline 'a' chunks, ids without pads, ref_s from len(phonemes) − 1) and its `kokoro_model.infer` (copied) vs `build(gpu=True)` on the Mac GPU and the iPhone GPU (remote executor). **Durations identical 225/225 on both; spectral similarity vs Python median 0.99700 / min 0.99001 (Mac), 0.99700 / 0.99048 (iOS) vs the Python↔Python (other seeds) baseline 0.99709 / 0.99137 → PASS**; Mac↔iOS median 0.99998. Time for 1911 s of audio: Python CPU 177 s, Mac GPU 28.0 s, iPhone GPU 34.1 s (on device). Listening page `e2e-runs/kokoro/2026-11-03/index.html` — **awaiting the user's listening verdict** before "passed"
-  - PASSED (2026-11-03): difference test PASS on Mac GPU and iOS GPU (225/225 durations equal, median 0.99700 vs baseline 0.99709) and the user listened on the page: "all good". Follow-up: the 24 corpus entries replaced for the public release (personal and third-party texts) are being re-run; they must pass the same difference test (the user may spot-check them on the page).
-  - Corpus change (2026-11-03): the 24 personal / third-party entries (t140-t147, t162-t177) replaced by written texts of the same id / class / voice / chunk count (no personal or third-party text left; UDID and english-practice path now from localconfig); re-run on all 4 outputs: 24/24 durations equal, overall still PASS (Mac median 0.99700 / min 0.99001, iOS 0.99702 / 0.99048 vs baseline 0.99710 / 0.99137)
-  - The 24 replaced texts re-checked independently (2026-11-03, the app's spectral_similarity straight from the WAVs): durations equal 24/24; Python vs Python median 0.99717 / min 0.99518, Mac GPU and iOS GPU vs Python 0.99703 / 0.99496 — PASS (user: passing the difference test is enough for these 24). Whole corpus: Mac GPU 0.99700 / 0.99001, iOS GPU 0.99702 / 0.99048 vs baseline 0.99710 / 0.99137, 225/225 durations equal.
+
+## iPhone unavailable (user, 2026-11-06 18:05: "I'm taking back the iphone") — `/tmp/lokinfer-phone-disabled`; remove it only when the user says
+Left for the phone (2026-11-06): **all done the same night** (21:39–23:02, docs/worklog.md): every lokinfer row
+re-measured from "nominal" with `--cool-to`, llama.cpp CPU e2e 300 s (221 s), the iPhone kernel bench rows, the
+Kokoro / other baseline data pushed back (kokoro.pte, kokoro-v1_0.safetensors, cases/*.kkc, other/*), and (23:11) the
+iPhone CPU kernel timing table. The `kSmeMinM` A/B was done 2026-11-07 (16 -> 5).
+
+### Earlier (user, 2026-11-05 16:00)
+Needs iPhone validation once it's back (focused runs, not sweeps): Q5 fused-kernel tests on the phone
+(`test_f16_fused_{cpu,gpu}.py --device=iphone`, after `scripts/ios_deploy.sh`); then Q4 model tests on the optimized
+variant on the phone (device tensors for the KV cache); the llama.cpp iPhone timings (Q6); re-push of the old iPhone
+baseline data.
+
+## Qwen3-ASR-1.7B — phase 1: measure the gap (plan: `impl-notes/qwen3-asr-port-plan.md`, draft v3)
+
+### Q0 — Precision gate and reproduction (no kernel code)
+- [x] (2026-11-05: `manual_generate` == HF `generate()` token for token on CPU f32 and MPS f16, chunked prefill
+  (chunks of 37) == unchunked; `split_long` is a copy of qwen-asr 0.0.6's 100 ms-window rule) `models/qwen3_asr/reference.py`: pinned HF revision; `prepare(audio)` = the caller contract (chunked features
+  `[n, 128, 100]`, `n_audio`, prompt ids) checked against the processor; `manual_generate` (chunked prefill ≤ 2048 +
+  T=1 loop) asserted equal to `generate()` on CPU f32 and MPS f16; `split_long` (qwen-asr's rule, 30 min case)
+- [x] (2026-11-05: test-clean sha256 pinned; s2 2.45 s, s5 5.53, s10 10.09, s30 29.48, s60 59.01, s111 111.95, s300
+  300.16 (one speaker each, all different below 300 s); test-clean has only ~8 min per speaker, so s1200 (1199.80 s,
+  3 speakers) and s1800 (1800.88 s, 4 speakers) chain speakers back to back) `models/qwen3_asr/clips.py` + committed `clips.json`: LibriSpeech test-clean (sha256, cache), clips 2 / 5 / 10 /
+  30 / 60 / 111 / 300 s + 1200 s + 30 min (Mac) from consecutive utterances of one speaker — first confirm a speaker
+  with ≥ 30 min exists (else test-other / dev-clean); edge clips 0.3 s, 1.00 s, 8.00 s, 8.08 s, silence, noise, tone
+- [x] (2026-11-05, **passed**, `docs/models/qwen3-asr.md`: f16 logit error ≈ 1e-3 (bf16 ≈ 1e-2), no non-finite
+  value, max activation 14,896 (4.4× under 65504), transcripts = G-true on 13 / 14 clips, the 14th a comma at a
+  0.004 near-tie) Precision gate (`bench/research/qwen3asr/precision_gate.py`): f64 G-true + G-f16w, f32, f16 MPS, bf16 MPS, f16
+  CPU if supported — per-stage error, max |activation| per layer, transcripts, NaN / inf. Exit: f16 transcripts =
+  G-true, max activation < 32768, no NaN; else stop and report to the user
+- [x] App-path reference timings (MPS f16) per clip: `docs/models/qwen3-asr.md` (indicative, Mac busy)
+
+### Q1 — Golden reference data
+- [x] (verified 2026-11-06: `~/.cache/lokinfer/qwen3asr/ref/` holds g_true / g_f16w / torch_f16 / inputs .npz for all
+  15 cases s2..s1200 + 7 edge clips, capture2.log CAPTURE_RC=0) (code written: `reference.capture` + `python -m models.qwen3_asr.reference`; one teacher-forced forward per
+  case and variant, tokens = the gate-verified f32 transcript) Capture per case into `~/.cache/lokinfer/qwen3asr/ref/`: G-f16w stages (convs, conv_out + pos, layers 0 / 11 /
+  23, ln_post, projector; LM layers 0 / 13 / 27, final norm, last-row logits), G-true greedy tokens + teacher-forced
+  logits at every generated position, torch f16 (MPS) values of the same stages (the calibration); ≤ 300 s in f64,
+  1200 s vs an f32 reference
+
+### Q2 — f16 basic kernels (the oracle), CPU and GPU
+- [x] Op contract `docs/impl-notes/qwen3-asr-f16-kernels.md` (same signature on both devices; `audio_cnn` = the conv
+  front end chunk by chunk; `add_pos_prefix` keeps the first N_a rows; one `attention_gqa` for prefill and decode)
+  and the scaffold (files wired into CMake / registry / ops, builds)
+- [x] CPU ops `python/lokinfer/ops/f16.py`, GPU ops `ops/f16_gpu.py`; `tests/kernels/test_f16_basic_{cpu,gpu}.py` vs f64 torch (real + odd
+  shapes, chunk / window boundaries, f16-rounding tolerances stated per kernel) (verified 2026-11-06: all four files
+  exist; 97 CPU / 145 GPU tests green per the two items below)
+- [x] (2026-11-05: the 18 contract ops as `<name>_f16_cpu`, ops `lk.ops.f16.<name>`; `tests/kernels/test_f16_basic_cpu.py` 97 passed on the Mac and 97 on the iPhone (`--device=iphone`), whole `tests/kernels` 877 passed on the Mac; casts / GEMV not separate ops per the contract: `audio_cnn` takes f32 features, `lm_head_last` returns f32, `gemm` covers M = 1) CPU `kernels/cpu/f16_basic.cpp`: casts, conv2d 3×3 s2 + bias + GELU(erf) (per chunk, NHWC), GEMM (+bias),
+  GEMV, LM-head last row → f32, GELU(erf), LayerNorm, RMSNorm, per-head RMSNorm, RoPE (takes `pos`), add /
+  add-clamp, SiLU·mul, per-chunk positions, embedding, audio scatter (j-th pad ← row j), windowed attention,
+  causal GQA attention over the cache, KV write, GQA decode attention — attention always streaming (no `[T, P]`
+  score matrix)
+- [x] GPU `kernels/gpu/f16_basic.metal` + `f16_gpu.cpp`: the same list (all 18 contract ops as `<name>_f16_gpu`, ops in
+  `ops/f16_gpu.py`; `tests/kernels/test_f16_basic_gpu.py` 145 tests green on the Mac GPU and the iPhone GPU,
+  2026-11-05; tolerances = f16 rounding + a stated, measured float32 term per op). RoPE: float angle
+  `float(pos + i) * float(inv_freq)` like HF's own f32 rotary path (also inside the f64 golden), cos / sin of it
+  accurate (Cody-Waite). Speed (Mac, indicative): 16x16-tiled GEMM ~0.9 TFLOP/s, audio_cnn ~8.5 ms per chunk
+- [x] Kernel tests green on Mac CPU / GPU and on the iPhone (`pytest --device=iphone`) (verified 2026-11-06:
+  test_f16_basic_cpu 97/97 Mac + iPhone, test_f16_basic_gpu 145 Mac GPU + iPhone GPU, recorded above)
+
+- [x] **Compiler bug (found by the Q2 CPU agent, fixed 2026-11-05)**: returning a persistent buffer from exec made
+  bufferize replace the state by a fresh output alloc each call, so that cache lost its contents every call (the
+  "first 16 bytes zeroed" = row 0 of a 4-wide f32 cache). Now a compile error ("persistent buffers can't be graph
+  outputs: return a copy"); lit `tests/lit/bufferize/persistent_return_rejected.lkir`; lit 24/24, Python API +
+  f16 CPU kernel tests 211 passed
+
+### Q3 — Basic graphs
+- [x] `fold_weights` (2026-11-05): layouts verified against HF — a torch emulation of the `audio_cnn` +
+  `add_pos_prefix` contract with the folded weights matches HF's encoder layer-0 input to 3.8e-5 (s10, e_window1,
+  e_short)
+- [x] (2026-11-05) Folded f16 weights straight from the safetensors, one tensor at a time (`fold_checkpoint`,
+  14 s, 708 tensors, 2.038 B params, 4.08 GB in `~/.cache/lokinfer/qwen3asr/weights_f16/`), memory-mapped by
+  `load_weights` (file-backed: no copy for CPU graphs)
+- [x] (2026-11-05: basic + opt graphs, CPU and GPU; caller-owned mutable KV cache; `debug_layers` per-layer outputs)
+  `models/qwen3_asr/model.py`:
+  `build_encoder` (features f32[n, 128, 100] + n_audio i64[1] → audio f16[N_a, 2048]; `dim.read`; CNN chunk loop),
+  `build_generate` (ids + audio + pos → last-row logits f32; persistent f16 KV caches, `cap` 6,656 default / 25,600
+  Mac; T ≤ 2048 per call), `transcribe` (the contract's loop), `save_models`; CPU and GPU graphs run every case on
+  the Mac, save / load round trip
+- [x] Remote executor split transport (user, 2026-11-06: "the original weights should be stored on the iPhone, without
+  losing perf"): HELLO feature `split_models`, message LOAD_MODEL_SPLIT (16). The client splits a .lkm into its
+  skeleton (header + metadata) and one blob per constant (sha256 each, `_C.lkm_constant_ranges`); only missing blobs
+  go up; the server maps each constant's blob file (`readModelSplit`: page-aligned, zero-copy, as readModelFile).
+  A weight on the device is never sent again, whatever graph uses it (Qwen's CPU and GPU graphs share theirs; a
+  graph / kernel change re-sends only the skeleton). Also fixed: a whole-model upload could never exceed the 2 GiB
+  frame limit, and macOS rejects single socket sends >= 2 GiB (EINVAL): sends now go in 1 GiB pieces.
+  tests/python/test_remote.py::test_split_model_weights_cached (Mac serve + iPhone). Qwen3-ASR on the iPhone:
+  default tier 20/20 (CPU + GPU), 6 min incl. the first upload
+- [x] ios_deploy.sh watchdog killed a healthy LokiHost mid-test (2026-11-06, iPhone slow tier: broken pipe): the
+  `devicectl --console` connection dropped (CoreDevice "The connection was invalidated") while the app kept
+  running, and the watchdog relaunched it with --terminate-existing. It now relaunches only once
+  `devicectl device info processes` no longer lists LokiHost
+- [x] iPhone GPU timeout on long prefills (Qwen3-ASR 111 s, T = 1473: "GPU timeout", then LokiHost kept failing):
+  no single kernel was long (max 15.7 ms); ~76 dispatches per command buffer (params ring) = ~0.6 s of GPU work.
+  GPU work budget per command buffer (docs/runtime.md). Forcing tiny budgets on the Mac exposed a real runtime race:
+  the hazard tracker trusted a fresh segment that already held the previous kernel's later dispatches (mid-kernel
+  commit); the first kernel of a segment now always gets a barrier. Mac: Qwen GPU slow tier with a 10 GFLOP budget
+  28/28, full suites green, GPT-2 decode unchanged (2.06 ms)
+- [x] iPhone GPU prefill is ~3.4x MLX Swift's (30 s: 497 vs ~145 ms): MLX uses the A-series GPU's f16 matrix units,
+  our steel GEMMs didn't. **Done 2026-11-07 (gpu-gemm agent)**: Metal 4 tensor-op (`matmul2d`) f16 GEMMs for M > 1
+  (`kernels/gpu/f16_tensor.metal`, docs/kernels/gemm.md "f16 tensor-op GEMM"), all fused epilogues kept, on by default
+  on Apple10+ GPUs (`kTensorGemmDefault`, flavour "_nax" = MLX's fragment layout, 64x128 tiles); the M2 Max keeps
+  steel (tensor ops are slower there). Validated on the phone: kernel tests --run-slow (layout-agnostic 193 passed,
+  "_nax" GEMM family 138 passed), Qwen model tests --run-slow CPU + GPU 56 passed with each flavour, + GPU 28 passed
+  with the final tile rule; transcripts golden. Recorded (iPhone GPU, from nominal): prefill 30 s 489 → 151.6 ms,
+  300 s 5,267 → 1,955 (MLX 146 / 1,993), enc 30 s 161 → 59.4 (MLX 98.2), e2e 30 s 3,341 → 2,933 (MLX 2,941);
+  docs/models/qwen3-asr.md "On the iPhone".
+  - Left: prefill 2 s (40.2 vs MLX 35.9 ms) and 30 / 60 s (+4 %); e2e 111 s / 300 s are decode-bound (llama.cpp Metal
+    ahead there). Ideas: split-K for small-M / large-K (MLX uses it for K >= 3 max(M, N)), a fused-epilogue cost check
+    on fc1 (GELU: 5.5 vs 8 TF/s), 128x128 vs 64x128 per shape on the encoder (enc o M = 3900 [1024x1024] 1.24 vs
+    3.15 ms in one noisy kernel-bench run).
+- [x] Remote executor leaked every client's models and device tensors (one Session for the app's lifetime): on the
+  phone a test run + a bench session accumulated Qwen executables (activation arenas of hundreds of MB each) and the
+  GPU started timing out even on tiny calls. They are now freed when the client disconnects (ids are never reused;
+  the blob store stays)
+- [x] GPU memory kept after a model was freed (2026-11-06): `gpu_allocated` stayed 4.3 GB on the phone with 0 models
+  after a GPU session, because residency-set removals were only committed at the next encode. `GpuContext::trim()`
+  now commits them (server: on disconnect and FREE_TENSOR); Mac repro: 3.57 GB -> 11 MB after the disconnect
+- [x] Remote executor `clear_blobs` message (server.cpp, remote.py): old blobs (whole models, superseded weights)
+  can be removed from the phone (2026-11-06: BLOBS message, see "Iteration speed") (2026-11-06: not implemented, no `clear_blobs` in the code)
+
+- [x] **Mutable inputs (user, 2026-11-05; plan decision 12)**: the KV cache is a caller-owned mutable input
+  `kv f16[28, 2, P, 1024]` (P = the caller's capacity: `kv_cache(cap, device)`; iPhone max 6,656 = one 5 min pass,
+  Mac 25,600 = one 20 min pass), not model-owned state. IR `%x: buffer<...> mutable` (`Region::mutableArgs`; text +
+  `.lkm` v2, v1 still read); Python `lk.MutableType`; verifier: an `inout` operand must be a mutable input or
+  persistent state (traced back through init for hoisted state), neither may be returned; runtime / Python refuse
+  any binding that would copy (strided, read-only, wrong dtype, unwrappable GPU memory) and overlapping inputs.
+  Found while doing it: **`inout` on an ordinary tensor input silently mutated the caller's array** (now a verify
+  error) and strided buffer inputs were silently copied (writes lost). lit 27/27 (3 new), C++ unit tests pass;
+  `build_generate` / `transcribe` / the Q4 tests use it
+- [x] Remote executor device tensors (alloc / write / read / free, RUN2 binds them in place; mutable args never run
+  on a copy; transparent `--device=iphone` path for tests) — agent, 2026-11-05. Built: protocol messages 12-15 +
+  RUN2 input kind 3 + HELLO feature "device_tensors" (server.h, server.cpp), MEMORY reports live device tensors,
+  `RemoteDevice.alloc_tensor / write_tensor / read_tensor / free_tensor` + `DeviceTensor`, conftest transparent
+  path; fuzz cases + budget / churn test (C++ `[remote]` 6/6), tests/python/test_remote.py 13/13 (f32 rows, f16 CPU
+  and GPU caches accumulating across RUN2 calls, mutable-inline refusals, transparent path) on Mac serve (12 + 1
+  Mac-only skip with `--device=serve`) and on the iPhone 18 Pro Max (`--device=iphone`: 12 passed, 1 Mac-only skip;
+  on-device Catch2 71/71 incl. the new fuzz cases)
+
+- [x] **GPU errors were silent after the first commit** (found 2026-11-05 on Qwen3-ASR long passes: zeros returned
+  as success): the reused `MTL4::CommitOptions` delivered feedback once. Fixed with fresh options per commit + the
+  sentinel (docs/runtime.md, "GPU failures"); latency +0.01 ms/call. Unit 71/71, Python/kernels/GPT-2/Kokoro/e2e
+  1311 passed. Also fixed: test_remote's `import conftest` resolved to tests/models/conftest.py in a mixed run.
+  iPhone: redeploy + device suite deferred (phone disconnected)
+
+### Q4 — Model correctness on 4 devices (optimized variant only — user, 2026-11-05)
+Basic kernels are proven by their op tests (Q2); the model E2E tests run on `variant="opt"` only (they skip until Q5).
+- [x] First full run on the basic graphs (stopped when the rule was set): transcripts 13/13 CPU + 13/13 GPU, encoder +
+  prefill 15/15 CPU incl. the 20 min pass, 14/15 GPU; failing: long teacher-forced s300 / s1200 (CPU), s300 (GPU),
+  GPU e_window1 encoder — the per-position "2× torch f16" bound may be too tight; re-check on opt with details
+  (verified 2026-11-06: re-checked on opt — failures were the references' RoPE rounding (item below), all tiers pass
+  Mac CPU + GPU, iPhone default 20/20 + slow 28/28 CPU + GPU)
+- [x] (verified 2026-11-06: golden data captured, test file uses it — DEFAULT / SLOW / long cases incl. edge clips +
+  isfinite checks; passes on all 4 devices) (written 2026-11-05, waits for the golden data) `tests/models/test_qwen3_asr.py`: stages vs G-f16w within 2× torch f16's error; transcripts = G-true by the
+  full greedy loop on clips ≤ 111 s; 300 s / 1200 s teacher-forced (logits at 16 sampled positions); edge clips (no
+  NaN / inf, transcript = G-true); `.lkm` weights f16 on disk
+- [x] Test tiers (user, 2026-11-05: the full Qwen3-ASR model tests take ~1-1.5 h on the basic CPU kernels):
+  `--run-slow` / `--run-long` in tests/conftest.py; default tier ~1-2 min per device; docs/correctness-testing.md
+- [x] Correctness rules reworked (2026-11-06, docs/correctness-testing.md "Model-level f16 rules"): RMS ≤ 2x + max
+  ≤ 4x torch f16 on the encoder output and every prompt row's lm_norm; logits checked by argmax (near-tie rule),
+  per-row RMS ≤ 4x, pooled RMS ≤ 2x. The old "max ≤ 2x" failed equally precise CPU variants by rounding luck; fault
+  injection (bf16-level weight noise, RoPE θ +1 %) shows the new rules catch real errors. All tiers pass on the Mac
+  (60/60, CPU + GPU); iPhone default tier 20/20
+- [x] (verified 2026-11-06: iPhone default 20/20 + slow 28/28 on CPU and GPU; 300 s peaks below, all < 5.5 GB; the
+  memory numbers are only here, not yet in docs/models/qwen3-asr.md) iPhone CPU + GPU via `--device=iphone`; memory high-water on the 300 s case recorded, must be < 5.5 GB (else
+  lower the iPhone `cap`). CPU e2e 300 s measured 2026-11-06 (fresh LokiHost, one bench session): resident peak
+  4.69 GB (incl. the mmapped weights), phys_footprint peak 0.86 GB -> within budget. GPU e2e 300 s (fresh LokiHost): resident peak 0.28 GB, footprint
+  peak 0.26 GB (Metal's no-copy weight wraps are not in either); gpu_allocated after: 0.38 GB with 0 models (the
+  storage pool's bounded cache)
+
+- [x] Long-context checks: the "2× torch f16" failures were the REFERENCES' fault, not lokinfer's (user asked to
+  investigate before changing the rule): `.to(float16)` rounded RoPE's inv_freq in G-f16w and in the torch f16
+  calibration (angles off by up to 3 rad at 17k); lokinfer is closer to f32 than torch at every layer
+  (docs/models/qwen3-asr.md "Long-context accuracy"). Fixed `load_model` (buffers exact); recapturing G-f16w + torch
+  f16, then rerun the long checks with the unchanged 2× rule. **Done 2026-11-05**: recaptured; all tiers (default +
+  slow + long) on the optimized variant pass, Mac CPU 30/30 (8.5 min) and Mac GPU 30/30 (58 s), incl. the 20 min pass
+  and both teacher-forced long checks, with the 2× rule unchanged. Q4 Mac done; iPhone deferred (disconnected)
+
+### Q5 — Slightly optimized version (basic + obvious fusions)
+- [x] Op contract `docs/impl-notes/qwen3-asr-f16-opt-kernels.md` (fused GEMM epilogues: bias+GELU, SwiGLU, residual
+  add, bias+add+clamp; QK-norm + RoPE + KV write; packed-QKV window attention; flash GQA; fast LM-head GEMV), scaffold
+  (`kernels/cpu/f16_fused.cpp`, `kernels/gpu/f16_fused.metal`), graph `variant="opt"` written (`_encoder_opt`,
+  `_lm_layer_opt`; enabled by adding "opt" to `M.VARIANTS` once the kernels pass), concatenated weights folded to disk
+  (`fold_opt`: 2.03 GB, memory-mapped, 3 s) — CPU and GPU kernel agents running
+- [x] (closed 2026-11-07: the last two dropped by decision, see below) Concatenated QKV / gate-up weights; fused add + RMSNorm, QK-norm + RoPE + KV write, SwiGLU epilogue, bias +
+  GELU(erf) epilogues, positions folded into `conv_out`; `tests/kernels/test_f16_fused.py` vs the basic kernels and
+  f64 torch (2026-11-06: concat weights, epilogues, QK-norm+RoPE+KV, tests `test_f16_fused_{cpu,gpu}.py` done; still
+  missing: positions not folded into `conv_out` (basic `add_pos_prefix` reused), no fused add + RMSNorm (rmsnorm+GEMM
+  fused instead) — tick if those are dropped by decision). **Dropped, 2026-11-07** (user: "finish phase 1"): the
+  per-kernel profiles show both are moot — the residual add lives in the GEMM epilogue (`gemm_add`) and the RMSNorm
+  in the next GEMM (`rmsnorm_gemm*`), so no standalone add / RMSNorm is left in the layers (the final norm: 0.0–0.1 %
+  of a call); `add_pos_prefix` is 0.013–0.017 ms, 0.0 % of the encoder on every device.
+- [x] GEMM / GEMV per device: GPU MPS f16 GEMM + `gemv4`-style f16 GEMV; Mac CPU NEON FMLAL tiles + K-split GEMV;
+  iPhone CPU SME2 FMOPA f16 path in `sme2_gemm` + the same GEMV (verified 2026-11-06: steel f16 GEMM kept after MPS
+  A/B + f16 GEMV in f16_fused.metal, FMLAL tiles + K-split GEMV in f16_fused.cpp, FMOPA f16 in f16_sme2.cpp; iPhone
+  CPU validation / `kSmeMinM` A/B tracked in the CPU opt kernels item)
+- [x] Attention: half flash attention with f32 online softmax (encoder windows, LM prefill GQA hd 128), key-split
+  GQA decode (any `cap`); CPU per-head NEON; encoder conv2d as im2col + f16 GEMM (verified 2026-11-06: GPU simdgroup
+  flash + key-split decode + im2col conv (qwen3-asr.md "Q5 GPU kernels"); CPU flash core with online f32 softmax +
+  FMLAL blocks in f16_fused.cpp, `audio_cnn_opt` im2col)
+- [x] GPU opt kernels (agent, 2026-11-05): all 12 contract ops `<name>_opt_f16_gpu` in kernels/gpu/f16_fused.metal +
+  f16_gpu.cpp (steel f16 GEMM 64x64x32 with fused epilogues / SwiGLU, f16 GEMV for M = 1, simdgroup flash attention
+  with half K / V fragments + float softmax, key-split GQA decode, qknorm+RoPE+KV write, im2col conv); MPS vs steel
+  measured (steel kept). tests/kernels/test_f16_fused_gpu.py 152/152 on the Mac and on the iPhone (default + slow).
+  Speedups in docs/models/qwen3-asr.md "Q5 GPU kernels" (bench/kernels/bench_f16_fused_gpu.py): Mac complete;
+  **needs iPhone validation**: the iPhone bench rows past the encoder o_proj (fc1, fc2, lm_head, qknorm, attention,
+  audio_cnn) — the phone was taken mid-run (2026-11-06 22:20: done, docs/models/qwen3-asr.md "Q5 GPU kernels"; the iPhone bench
+  skips the longest cases: decode pos 20000, prefill pos 13570, window S=15600) (2026-11-06: tests done on iPhone; those iPhone bench rows are still "-"
+  in qwen3-asr.md)
+- [x] `variant="opt"` passes Q4's model tests on 4 devices; speedup vs basic recorded per case kind (2026-11-06: Mac,
+  docs/models/qwen3-asr.md "Fused vs basic"; basic rows for every case ≤ 300 s on the dashboard) (2026-11-06: tests
+  pass on 4 devices; missing: model-level basic vs opt speedup per case kind — only per-kernel speedups recorded, no
+  `lokinfer basic` rows)
+- [x] Side measurement: Mac CPU `BFMMLA` (bf16) vs `FMLAL` (f16) tile throughput, recorded (no change now):
+  FMLAL 4x16 tile 793 GFLOP/s on 8 P cores vs BFMMLA 396 (docs/models/qwen3-asr.md "Q5 CPU kernels")
+- [x] CPU opt kernels (`kernels/cpu/f16_fused.cpp` + `f16_sme2.cpp`, `tests/kernels/test_f16_fused_cpu.py`, all 12 ops
+  of the opt contract): Mac default + slow tiers green, speedups vs basic recorded (Mac); **needs iPhone validation**
+  (phone taken 2026-11-05): default tier passed once on the phone, but the slow tier, the iPhone timing table, the
+  SME2-vs-NEON A/B for `kSmeMinM` and one unreproduced phone hang (`test_audio_cnn_opt[3]`, first run) are open
+  (2026-11-06: no evidence yet of test_f16_fused_cpu slow tier on iPhone; qwen3-asr.md still lists all four as open)
+  2026-11-06 17:10: **slow tier on the iPhone: 106 passed, 2 skipped (2:46)**, the audio_cnn cases included, no hang.
+  2026-11-06 23:11: the iPhone (and a fresh Mac) kernel timing table, `bench_f16_fused_gpu.py --cpu [--iphone]`
+  (qwen3-asr.md "Q5 CPU kernels"). 2026-11-07: `kSmeMinM` SME2-vs-NEON A/B done on the iPhone (one deploy per
+  setting): SME2 wins 1.6-4x at every M from 5 to 128 -> kSmeMinM 16 -> 5 (qwen3-asr.md "Q5 CPU kernels")
+
+### Q6 — Baselines (all f16, each verified before timing)
+Setup + verification done 2026-11-05 (docs/baselines.md § 8, impl-notes/iphone-baselines.md Qwen3-ASR section).
+Verified = greedy transcript of s10 and s30 equal to the f32 CPU reference (`R.manual_generate`). Dashboard timings
+are Q7 (shared harness); only indicative timings so far.
+- [x] torch eager CPU, torch.compile CPU, torch MPS, torch.compile MPS: `bench/models/bench_qwen3asr_baselines.py`
+  (enc / prefill / decode@C / e2e; `--verify`); all four verified token for token. torch CPU f16 = PyTorch's generic
+  path, labelled. Open: "n/a: OOM" check of the 1200 s prefill (Q7)
+- [x] MLX Python (Mac GPU): `runners/qwen3asr_mlx.py`, mlx 0.32.4 + mlx-audio 0.6.4 in `<baselines>/.venv-mlx`
+  (`mlx_python` set), f16 weights `<baselines>/models/qwen3-asr-mlx-f16` (sinusoid table cast too); verified
+  token for token
+- [x] llama.cpp b12125 (`7d516e25`, patched converter for the `-hf` layout + M-RoPE sections, BLAS off): f16 GGUF +
+  mmproj; Mac CPU / Metal verified (mtmd-cli + harness Mac CLI); iPhone CPU / Metal harness `<baselines>/llamacpp-ios/`
+  (xcframework with `armv8.6-a+fp16`, BLAS off) verified on the phone. Notes: llama.cpp feeds up to 12 extra padded
+  audio tokens (s10 161 vs 149); its activations / norms are f32 (only weights + KV are f16)
+- [x] (2026-11-06: all long cases on the dashboard, CPU e2e 300 s 221 s) llama.cpp iPhone indicative / 5 min (`s300`, `n_ctx` ≥ 6,446) runs: the 2026-11-05 attempt was SIGKILLed by
+  another session's `ios_deploy.sh` watchdog (`--terminate-existing`; `ios_deploy.sh` does not take the phone lock)
+  (2026-11-06: 2-30 s iPhone llama.cpp rows are on the dashboard; s300 still not run)
+- [x] MLX Swift (iPhone GPU): mlx-audio-swift @ `927d4e30` (patched: f16 sinusoid table, public submodules),
+  mlx-swift 0.33.0, harness `<baselines>/qwen3asr-mlx-swift/` (enc / prefill / decode / e2e separately,
+  `MLX_MEMLIMIT_MB=5500 MLX_CACHE_MB=1024`), f16 weights converted on the Mac; verified token for token on the iPhone
+  and the Mac CLI; indicative iPhone numbers in iphone-baselines.md
+- [x] (verified 2026-11-06: perf/results.json has 14 rows each for llama.cpp Mac CPU / Mac GPU, torch MPS,
+  torch.compile CPU) Mac timings left for Q7 (indicative table in baselines.md § 8.3): llama.cpp Mac CPU / Metal (harness CLI
+  `<baselines>/llamacpp-ios/llamacpp_asr_mac`, `llama-bench -p T` / `-n 1 -d C-1`, CPU with `-dev none`), torch MPS
+  decode / e2e (crop fix landed after its run), torch.compile CPU (its run overlapped another model job). All model
+  jobs under `/tmp/lokinfer-bigmodel.lock`
+- [x] (verified 2026-11-06: ref_s60 / s111 / s300 / s1200 / s1800p1-2 .json in ~/.cache/lokinfer/qwen3asr/baselines/)
+  References for s60 / s111 / s300 (and the f32-reference 1200 s) for the long cases: `prep_qwen3asr.py` /
+  `bench_qwen3asr_baselines.ref()` compute them on first use (bounded-memory `R.load_model(torch.float32)`)
+
+- [x] (2026-11-05) Fixed: `scripts/ios_deploy.sh` now takes `/tmp/lokinfer-phone.lock` itself (a deploy relaunches
+  LokiHost and kills any app on the phone; one did kill the llama.cpp timing runs) unless `LOKINFER_PHONE_LOCK_HELD=1`
+- [x] (2026-11-06 23:00, pushed) Re-push the old iPhone baseline data (Kokoro, `other/` models) before re-running those iPhone baselines: the
+  Qwen3-ASR harness install reset the shared app's `Documents/baselines/` (iphone-baselines.md has the push commands);
+  the phone now holds ≈ 8.2 GB of Qwen3-ASR baseline model files (2026-11-06: no evidence of the re-push)
+- [x] Big-model jobs (anything holding the 4 GB weights) run under `/tmp/lokinfer-bigmodel.lock`, one at a time
+  (2026-11-05, after a 15 GB swap episode; docs/benchmarking.md)
+
+### Q7 — lokinfer benchmarks and the dashboard
+- [x] (closed 2026-11-07 with the exceptions below, documented in qwen3-asr.md "Fused vs basic") `bench/models/bench_qwen3asr.py`: `lokinfer basic` (all enc / prefill / decode cases, e2e ≤ 300 s) and
+  `lokinfer` (every case incl. e2e 1200 s and 30 min on the Mac) on 4 devices; ≥ 30 runs / ≥ 2 s, ≥ 3 runs when a
+  run exceeds 10 s. 2026-11-06: `lokinfer fused` done (30 cases Mac CPU / GPU, 25 iPhone CPU / GPU); `lokinfer basic`
+  on the Mac for every case ≤ 300 s, CPU enc / prefill / decode 1200 s (prefill 405 s per call vs 48 s fused), GPU
+  enc 1200 s. Not timed: GPU decode / prefill 1200 s (basic's GPU attention is not key-split: one dispatch over
+  ~15,600 keys hits the macOS GPU timeout; a basic-kernel limit, not fixed: basic is the oracle). iPhone basic (night
+  2026-11-06): every case ≤ 30 s on CPU and GPU; longer clips not timed (single-dispatch attention vs the iOS GPU time
+  limit)
+- [x] perfdb + `perf/results.json` meta: Qwen3-ASR-1.7B first, "f16 on every device"; `perf/index.html`: shown first,
+  one column, counted in the top totals (user) (verified 2026-11-06: meta.models lists Qwen first with the f16
+  description (bench/perfdb.py); index.html orders by meta, one-col for many-case models, totals over all entries)
+- [x] Gap summary + per-kernel profile (30 s case, each device) in `docs/models/qwen3-asr.md` (2026-11-06: "Per-kernel
+  profile, 30 s clip", all 4 devices) (2026-11-06: gap tables
+  for Mac + iPhone done; missing: the per-kernel profile of the 30 s case per device)
+- [x] Kokoro / GPT-2 goal guard still green (`tests/perf/test_dashboard_goals.py`) (verified 2026-11-06: passes)
+
+### Perf (Mac, after the Q7 measurements; user, 2026-11-05: "improve more perf")
+- [x] CPU large-M GEMMs on the AMX (Accelerate): `gemmOpt` converts x and W column panels f16 -> f32 (exact) on the
+  pool, one multithreaded `cblas_sgemm` per panel, same f32 epilogue (Mac only; SME2 iPhones keep FMOPA). Kernel:
+  1.8-2.9x (gate|up T = 2048 139 -> 47.5 ms, LM down T = 401 14.5 -> 6.5). Model, Mac CPU: enc 30 s 732 -> 420 ms,
+  prefill 30 s 1772 -> 879, prefill 300 s 19.9 -> 9.5 s, e2e 30 s 5.0 -> 4.1 s (decode-bound). f16 fused CPU
+  tests 98/98, Qwen CPU default tier 10/10
+- [x] GPU decode GEMV: `kOptGemvGroups` 32 -> 128 (M2 Max). In-model A/B (decode C = 480): 12.74 -> 12.25 (64) ->
+  12.14 ms (128); 256: 13.02. N = 2048 GEMVs had 32 threadgroups for 38 GPU cores. The kernel bench reuses its
+  weights from the SLC and showed no difference: judge GEMV changes in-model (prof-lokinfer qwen3asr_decode)
+- [x] CPU decode GEMV: 1 K-split task per pool thread on the Mac (was 3): o 90 -> 100 GB/s, qkv 103 -> 115, down
+  102 -> 107, swiglu 102 -> 105 (microbench, distinct weights > SLC). decode 30 s 35.0 -> 33.3 ms (llama.cpp CPU
+  31.7), e2e 30 s 5.0 -> 3.93 s. Tried without gain: 16 weight rows per pass (partial traffic halved), a packed
+  [K/8][N][8] linear-stream layout (standalone test 97 vs 95 GB/s). CPU streaming ceiling here ~124 GB/s
+- [x] CPU encoder: vectorized GELU epilogue (`erfc4` / `geluErf4` in neon_math.h, Numerical Recipes' erfcc with an
+  exact-square split: rel 6.0e-7; 5.7e-7 vs the f32-argument erfc the basic kernels use; tests/unit neon_math) and a
+  batched AMX audio CNN on the Mac (conv weights f32 once per call, im2col straight to f32, 4 chunks per sgemm,
+  conv_out over all chunks). enc 30 s 400 -> 320 (GELU) -> 281 ms; audio_cnn 160 -> 92.5, fc1 GEMMs 121 -> 70
+- [x] CPU large-M GEMMs on BNNS (`BNNSMatMul` f16 x f16 -> f32 on the AMX, f32 accumulation; deprecated API, still
+  in the macOS 27 SDK; the convert + sgemm path stays as fallback): no f32 weight copy, 2.3-2.5 TF/s (qkv T = 401
+  4.91 -> 2.76 ms, gate|up 14.7 -> 8.28, down 6.49 -> 3.98). prefill 30 s 866 -> 552 ms, enc 30 s 281 -> 238.
+  Audio CNN on BNNS too (conv1, K = 9, on the NEON tiles: 86 vs 105 ms; 2 chunks per GEMM, A/B 1/2/4/8 = 83 /
+  82 / 86 / 152 ms); conv_out always on BNNS so a chunk's output is the same bit for bit whatever the chunk count
+  (test_audio_cnn_opt's exact check caught the M-dependent engine choice). enc 30 s now ~214 ms (from 400)
+- [x] CPU GEMV: two column blocks for very wide W (gate|up, 24,576 columns): 103 -> 108 GB/s (4 blocks: 101). Long-
+  context CPU decode attention (C = 15,600: 28.9 ms of a 62 ms step, ~62 GB/s): more key splits did not help (2/4/8/16
+  tasks per thread 28.9-32.1 ms): per-key compute + memory not overlapped; open
+- [x] CPU prefill attention on the AMX (Mac, T >= 64): per (kv head, 64 query rows), key tiles of 256, QKᵀ and PV as
+  sgemms (8 concurrent small sgemms: 2.2 TF/s vs ~0.6 for the NEON flash path), online f32 softmax unchanged. prefill
+  20 min 83.4 -> 48.3 s, 300 s 8.4 -> 6.5, 111 s 2.2 -> 1.96. All attention tests (incl. slow) pass
+- [x] CPU long-context decode attention (Mac, >= 1024 keys): tasks split the keys only and feed every kv head per
+  64-key tile (whole 2 KB cache rows read in order instead of 256 B head slices 2 KB apart): attention at C = 15,600
+  28.9 -> 22.2 ms; decode 20 min 70.7 -> 63.8 ms, 300 s 42.2 -> 39.9. (A fused in-register V conversion: no gain.)
+- [x] CPU timing noise: on 8 pool threads over 8 P cores, any other busy process (the editor's renderer) delays every
+  barrier; CPU medians drift 10-15 % above p10 at times. Measured 2026-11-07 (qwen3-asr.md "CPU decode GEMV
+  streaming"): 7 pool threads -10 % always (rejected); 2 K-split tasks per thread +1-2 % quiet, -7-9 % with 8 busy
+  user-interactive threads (decode 30 s 40.7 -> 37.9 ms); 1-4 busy threads cost nothing (they go to the E-cores).
+  Kept 1 task per thread; rule instead: record CPU rows only at a 1-min load average < 2 (+ build lock)
+- [x] CPU decode vs llama.cpp CPU (8 threads too): 33.3-34.0 vs 29.8-31.7 ms. llama.cpp's f16 dot products accumulate
+  partly in f16 (fewer instructions per weight); ours must accumulate in f32 (contract). 2026-11-07: not the
+  accumulation but the access pattern: the M = 1 GEMV now reads 2 W rows × 64 columns per step (2 streams per core,
+  16 f32 accumulators; was 8 rows × 8 columns): 104 -> 115.5 GB/s of the 124 GB/s P-core ceiling, bit-identical
+  outputs; LM head 4 -> 2 rows per pass (5.6 -> 4.9 ms). In-model A/B: decode 2 s ~33.9 -> ~31.3, 30 s ~36.7 ->
+  ~31.1 ms; dashboard (quiet, load 1.9) 29.9 / 30.4 ms (llama.cpp 29.8 / 31.7). Left: llama.cpp's [N, K] dot layout reads ~1-2 % faster still (needs [N, K]
+  weights in every prefill path)
+- Night of 2026-11-05: the dashboard's short cases (2-30 s, both devices) re-recorded with every change above, display
+  asleep (the aerial wallpaper's GPU use made earlier GPU timings noisy: prefill 10 s read 64-86 ms). With the display
+  off the Mac also idle-sleeps (`sleep 1`): runs paused for up to ~14 min mid-sweep (perf_counter stops, wall clock
+  does not); overnight work now runs under `caffeinate -i -s`. `/tmp/lokinfer-macbench.lock` vanished once while
+  held (nothing in the repo deletes it; another session?): lk-lock recreates it, but two holders could then overlap
+- [x] **iPhone memory: `fc-thrashing` jetsams** (2026-11-06; addressed 2026-11-07): with the phone short of RAM (free ~0.27 GB, compressor
+  ~5.6 GB of other apps), iOS evicts the 4 GB of mmapped weights and re-reads them from flash every decode step
+  (~3 s/step instead of 0.1 s), then kills processes (JetsamEvent reason LokiHost, kills `fc-thrashing`). Seen on CPU
+  e2e 300 s. Every observed case followed a GPU session whose 4.3 GB of GPU allocations stayed (fixed above, the
+  residency trim). 2026-11-07 (memory agent; docs/models/qwen3-asr.md "Memory under pressure"):
+  - [x] KV cache sized to the pass: already everywhere (bench: min(MAX_CAP, prompt + max_new rounded up to 1024);
+    tests: per case; `transcribe`: prompt + max_new)
+  - [x] reproduced on purpose: `bench/models/pressure_qwen3asr_iphone.py` (decode steps timed while a balloon of
+    random device tensors fills RAM). CPU graph unpinned: 2.8-10.6 GB of page-ins per 20 steps from the first 0.5 GB
+    of balloon, max step 2.1-2.7 s. GPU graph: no page-ins up to 3.5 GB (its weights are resident Metal buffers,
+    wired while GPU work runs, not charged to the footprint)
+  - [x] pressure reported to the client: MEMORY + `available` (os_proc_available_memory), `pressure` (dispatch
+    memory-pressure source), `pressure_events`, `pageins`, `weights_resident` (mincore), system free / file / compressor
+    / wired; `RemoteDevice.memory_check()`; the iPhone Qwen bench warns and never records a case under pressure or
+    with more page-ins than the weights' size; the test harness warns at connect
+  - [x] PIN_MODEL (feature "pin_model"): mlock works on iOS (3.44 GB wired, 0 page-ins under the balloon) but the
+    wired pages count in phys_footprint (+3.2 GB against the ~6 GB app limit), so it trades thrashing for jetsam
+    risk. Mode "gpu" (a residency set of its own + requestResidency): wired without footprint on the Mac, but on
+    the iPhone (2026-11-07 18:47) charged like mlock (+3.2 GB) while stopping the page-ins as well: on iOS any pin
+    costs the weights' size in the app budget (CPU e2e 300 s then peaks ~4.3 GB of ~6: fits)
+  - [x] (phone) `pressure_qwen3asr_iphone.py --device cpu --pin none gpu` and test_remote.py --device=iphone on
+    the final build (2026-11-07 18:47-18:49)
+  - [x] (phone, 21:18) A/B `bench_qwen3asr_iphone.py --device cpu --quick --pin none / gpu`, alternating: no cost
+    (gpu as fast or faster in each pair); the bench now pins its CPU graphs by default (`--pin auto`); the test
+    harness doesn't (headroom). The 46 s e2e 30 s of 19:13 re-checked: 5.1-5.4 s, an artifact of the phone dropping
+  - [x] (phone, 21:22-21:40) iPhone per-case table (`measure_qwen3asr_memory.py`, qwen3-asr.md "Memory per case"):
+    CPU footprint ≤ 0.64 GB (e2e 300 s, golden), GPU ≤ 0.17 GB; resident up to 4.47 GB (CPU, mapped weights)
+  - [x] (phone, 21:50-21:55) Qwen model tests `--device=iphone --run-slow` 56 passed + 4 skipped, test_remote.py
+    `--device=iphone` 17 passed + 3 skipped, on the final build. Left: only the 1-row items below (WRITE_TENSOR
+    payload) and, if ever wanted, pinning in the test harness / an app-level "pin when the budget allows" policy
+  - [x] per-case memory (Mac, `measure_qwen3asr_memory.py --where mac`; qwen3-asr.md "Memory per case"): CPU
+    footprint = written KV + 0.1-0.25 GB of arenas / scratch (e2e 300 s peak 0.84 GB, iPhone 0.86); GPU ≤ 0.18 GB.
+    The 2048-row prefill arenas add ≤ 0.2 GB: not shrunk (≤ 4 % of the working set, prefill speed risk); the
+    weights' eviction is the problem
+  - [ ] WRITE_TENSOR / PUT_BLOB hold the whole payload in a buffer: a 512 MiB write raised LokiHost's footprint
+    ~1 GB transiently (big uploads only; read straight into the tensor / file if it matters)
+- [x] iPhone CPU: re-measure kGemvTasksPerThread (was 3) + LM-head rows + kSmeMinM (2026-11-07, one deploy per
+  setting, alternating, cool phone; qwen3-asr.md "CPU decode GEMV streaming" / "Q5 CPU kernels"): decode step C = 480
+  tpt 1 / 2 / 3 = 48.7 / 40.8-42.5 / 49.4-50.1 ms -> 2; LM head 2 vs 4 rows 6.8 vs 7.0 ms -> 2; SME2 from M 5 (wins
+  1.6-4x over the NEON tiles at every M 5-128; was 16). New kernels + final setting validated on the phone (fused CPU
+  kernels + Qwen CPU model tests, slow tiers)
+- [ ] iPhone: re-measure the GPU tile / GEMV-group rules (the CPU half of this item is done above)
+- [x] GPU decode: rmsnorm folded into the next GEMV: new ops `rmsnorm_gemm_opt` / `rmsnorm_gemm_swiglu_opt` (CPU +
+  GPU; contract doc updated). M = 1 on the GPU: one dispatch (`lk_f16o_rms_gemv`, each threadgroup normalizes the row
+  with lk_f16_rmsnorm's exact sum order); else rmsnorm into a workspace output + the GEMM. Bit-identical to the
+  composition (tests/kernels/test_f16_rms_gemm.py, 36 cases). Back-to-back A/B decode C = 480: 12.64 / 12.67 ->
+  11.92 / 12.07 ms
+- [ ] GPU decode: down / qkv / o GEMVs at ~300 GB/s vs swiglu 335 and lm_head 376
+- [x] GPU prefill at short T: 64x64 steel tiles only from M >= 1024 (`kOptMin64Rows`, Mac): prefill 10 s 77.5 ->
+  62.6 ms (llama.cpp Metal 68), 30 s 162 -> 145 (167), enc 30 s 56.7 -> 55.5, enc 300 s ~611 -> 540; a 2048-row
+  chunk keeps 64x64 (736 vs 826 ms with 32x32). Threshold re-checked at M = 789 (prefill 60 s) with alternating runs
+  (GPU timings drift ~10 % with heat between separate runs: only alternate A/B counts): 32x32 278-294 ms vs 64x64
+  291-335, so 1024 stays
+- [x] bench_qwen3asr.py: the KV cache is reused while big enough (it was reallocated + zeroed, 2.9 GB, whenever the
+  capacity bucket changed: e2e 30 min's two passes alternate buckets)
+- [ ] Note: prof-lokinfer's GPU profile shows ~0.9 ms of gaps at segment boundaries that unprofiled calls don't have
+  (e2e 12.74 vs kernel sum 12.5 ms): a profiling artifact
+
+### Iteration speed for large models (user, 2026-11-06: "being able to iterate / bench / profile quickly over large models is important"; playbook: docs/big-models.md)
+- [x] Cost of `RemoteDevice.load(CompiledModel)` when every blob is cached (Qwen3-ASR generate, measured 2026-11-06):
+  build 1.5 s + .lkm write 1.1 s + sha256 1.4 s (now 8 threads: 0.2 s) + 226 HAS_BLOB round trips (now one BLOBS
+  query, 2026-11-06). Split straight from the in-memory model (2026-11-06: `_lokinfer.lkm_split` = C++ `lkmSplit`:
+  the skeleton + zero-copy views of the constants; no .lkm written, no 3.4 GB in-memory copy; byte-identical to the
+  file's split, tests/python/test_remote.py::test_lkm_split_matches_saved_file). Left: the graph build itself (1.5 s)
+- [x] prof-lokinfer on the iPhone with mutable inputs: allocate them as device tensors and profile through RUN2
+  (today: a hand-written set_profile / run2 / take_profile script) (2026-11-06: collect.py's iPhone path holds every
+  input >= 1 MB as a device tensor, zeroed ones never sent, and times / profiles through RUN2)
+- [x] tests/conftest.py transparent remote path: keep a device-resident copy per mutable host array (re-upload only
+  when the host array changed: checksum), and build the result objects without re-running the graph on the Mac
+  (2026-11-06: `_mirror` per argument slot / dtype / shape, blake2b of the last synced contents, LRU <= 1 GiB; the
+  local run happens once per model, to learn the outputs' devices; read-back of mutable inputs stays)
+- [x] (2026-11-06) Debug builds compiled shaders at -O0, where lk_f16o_gemm_swiglu_64x64 fails pipeline creation
+  ("exceeds available stack space"): build/lokinfer-serve and `--device=serve` could not run Qwen3-ASR on the GPU.
+  cmake/LokiMetal.cmake: always -O3 (cache var LOKI_METAL_OPT for a one-off -O0)
+- [x] (2026-11-06) One LokiHost crash failed every later test of the session (108 tests on the dead connection):
+  `RemoteDevice.reconnect()` + the harness reconnects before the next test (tests/conftest.py)
+- [x] (2026-11-07) `--device=iphone` sessions piled up every test's models until iOS killed LokiHost: FREE_MODEL
+  message (18, "free_model"); the harness frees each test's models by id (`LOKINFER_TEST_MEMLOG=1` prints the
+  executor's memory after every test)
+- [x] (2026-11-06) Test fixtures leaked `lokinfer-serve` processes when a call or shutdown failed (7 piled up; the
+  next runs timed out on gpu_inspect): the fixtures now kill the server in `finally`
+- [x] `--quick` mode for bench_qwen3asr*.py (1 warm-up + 5 runs, never recorded) for A/B during development; the full
+  decision-11 protocol only when recording (2026-11-06: `--quick` on bench_qwen3asr.py and bench_qwen3asr_iphone.py,
+  3 runs for calls > 10 s, iPhone e2e one pass; refuses `--record`. Mac GPU decode 2 s + enc 5 s + e2e 5 s in 8.5 s)
+- [x] Remote `clear_blobs` + blob storage report (the phone accumulates superseded weights and whole-model blobs)
+  (2026-11-06: message BLOBS (17), feature "blobs": `dev.blobs()`, `dev.clear_blobs(keep=...)`,
+  `dev.remove_blobs(shas)`; tests/python/test_remote.py; the phone held 1,390 blobs / 4.79 GB). Mode 3 (feature
+  "blobs_query", `dev.stored_blobs(shas)`): which blobs are stored in one round trip; the split upload uses it instead
+  of one HAS_BLOB per constant
+- [x] iPhone benches: thermal gating per device (cool to "nominal"/"fair" before each device's sweep; today the CPU
+  sweep ran at "serious" after an hour of tests) (2026-11-06: per case, not per device: `bench_qwen3asr_iphone.py
+  --cool-to nominal|fair --cool-max-wait S` (default nominal, 600 s), the wait is printed and the state recorded)
+
+### Speech-to-text in lokinfer — NEXT STEP (designed 2026-11-06, not started; the user starts it)
+Design + decisions: docs/impl-notes/speech-to-text-design.md; research: docs/impl-notes/research-speech-to-text.md.
+**Ultimate goal (user): the full E2E binary faster than the PyTorch / MLX pipelines end to end (warm: model loaded,
+call → text), with the same output as today's Python path (english-practice: transformers, English, greedy,
+transcription_only).** Mac first, English only, Qwen3-ASR only with generic shared layers.
+- [ ] Shared audio layer: WAV reader (FLLR / EXTENSIBLE / 8-16-24-32-bit / float), mean downmix, Kaiser-sinc polyphase
+  resampler (kaiser_best constants; tests vs torchaudio ~1e-6), parameterized log-mel (≤ 1e-5 vs the HF extractor),
+  quiet-point splitter (= reference.split_long)
+- [ ] Shared text layer: byte-level BPE tokenizer in C++ (binary converted from tokenizer.json; NFC; Qwen2
+  pre-tokenizer; tests + fuzz vs the Rust `tokenizers`), streaming detokenizer, generation loop (chunked prefill,
+  session-owned KV cache, eos / max / capacity / cancel stops)
+- [ ] Device-side argmax in the decode graph (4 bytes read back per token); token id fed back on the device;
+  pipelined decode (step N+1 enqueued before reading token N), then K steps per commit with the ICB replay
+- [ ] models/qwen3_asr: `SpeechToText::load` / `transcribe(pcm, frames, rate, channels, options)` (prompt ids,
+  N_a, chunk layout, chunked prefill, `max_new_tokens = 128 + 8·s`, transcription_only parsing, capacity-based split);
+  a features-in path for golden tests; Python mirror
+- [ ] Model cache: `--model <name>` downloads the pinned HF snapshot and converts it once (C++: HTTP download,
+  safetensors reader, weight folding, tokenizer binary) into `~/.cache/lokinfer/models/<name>`
+- [ ] `utils/speech-to-text` binary: `--input FILE|-`, `--raw-f32 --rate --channels`, `--model`, `--device`,
+  `--max-pass-seconds`, `--max-new-tokens`, `--format txt|json`, `--timings`
+- [ ] Correctness: generated ids = transformers greedy `generate` on the golden clips (near-tie rule), text =
+  `decode(transcription_only)`; > 20 min in one pass vs split (accuracy check)
+- [ ] E2E benchmark (warm; 2 s … 30 min + 48 kHz stereo) vs qwen-asr / transformers MPS + CPU, mlx-audio Python +
+  Swift, llama.cpp mtmd; on the dashboard; lokinfer must win
+- Later: speed modes on top of the configurable options (deliberate splitting with parallel / batched passes,
+  decoding beyond greedy, e.g. speculative), benchmarked as their own category, not against the reference-matched rows
+- Later: iPhone binding, english-practice switch, timestamps, VAD, other languages, cold start
+
+### Q8 — Docs
+- [x] (2026-11-07: all listed gaps closed — perf-dashboard.md, baselines.md, iphone-baselines.md, status header,
+  per-kernel profiles, the "Memory" section) `docs/models/qwen3-asr.md` (contract, gate results, correctness, memory, gap, bf16 side measurement),
+  `docs/correctness-testing.md` (f16 calibrated-bound rule), `docs/perf-dashboard.md`, `docs/baselines.md`,
+  `docs/runtime.md` if touched, `README.md` (models list) (2026-11-06: README, correctness-testing.md, baselines.md § 8,
+  qwen3-asr.md mostly done; missing: perf-dashboard.md never mentions Qwen3-ASR; baselines.md table row 27 still says
+  "not on the dashboard yet"; qwen3-asr.md status header says iPhone model tests / baselines / timings pending, no
+  per-kernel profile or 300 s memory numbers; iphone-baselines.md llama.cpp section still says "no iPhone timing yet")

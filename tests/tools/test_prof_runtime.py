@@ -103,11 +103,16 @@ def server(tmp_path_factory):
     port = free_port()
     proc = subprocess.Popen([str(SERVE), "--port", str(port), "--blobs", str(tmp_path_factory.mktemp("blobs"))],
                             stdout=subprocess.DEVNULL)
-    dev = RemoteDevice.connect("127.0.0.1", port)
-    yield dev
-    dev.shutdown()
-    dev.close()
-    proc.wait(timeout=10)
+    try:
+        dev = RemoteDevice.connect("127.0.0.1", port)
+        yield dev
+        dev.shutdown()
+        dev.close()
+        proc.wait(timeout=10)
+    finally:  # a failed call (or shutdown) must not leak the server: leaked ones piled up and slowed later runs
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
 
 
 @pytest.mark.parametrize("dev", ["cpu", "gpu"])

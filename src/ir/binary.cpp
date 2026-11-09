@@ -14,7 +14,7 @@ namespace lk {
 namespace {
 
 constexpr char kMagic[4] = {'L', 'K', 'M', '\0'};
-constexpr uint32_t kVersion = 1;
+constexpr uint32_t kVersion = 2;  // 2: exec mutable-arg flags after the args (version 1 still read: none)
 constexpr size_t kHeaderSize = 64;
 constexpr size_t kDataAlign = 16384;
 
@@ -136,6 +136,8 @@ class ModelEncoder {
   }
   Status region(Writer& w, const Region& r) {
     ids(w, r.args);
+    w.uv(r.mutableArgs.size());
+    for (uint8_t f : r.mutableArgs) w.u8(f);
     ids(w, r.state);
     w.uv(r.ops.size());
     for (const Op& op : r.ops) {
@@ -246,15 +248,24 @@ class Reader {
   bool ok_ = true;
 };
 
-Expected<std::unique_ptr<Model>> decode(const uint8_t* base, size_t size, std::shared_ptr<const void> owner) {
+// A constant's bytes taken from outside the file (readModelSplit): pointer, size, owner (keeps the mapping alive).
+struct SplitConstant {
+  const uint8_t* bytes = nullptr;
+  size_t size = 0;
+  std::shared_ptr<const void> owner;
+};
+
+// split: the "skeleton" form (header + metadata only; constant i's bytes from split[i]).
+Expected<std::unique_ptr<Model>> decode(const uint8_t* base, size_t size, std::shared_ptr<const void> owner,
+                                        const std::vector<SplitConstant>* split = nullptr) {
   if (size < kHeaderSize) return Status::error("lkm: file too small");
   Header h;
   std::memcpy(&h, base, sizeof h);
   if (std::memcmp(h.magic, kMagic, 4) != 0) return Status::error("lkm: bad magic");
-  if (h.version != kVersion) return Status::error("lkm: unsupported version " + std::to_string(h.version));
+  if (h.version != kVersion && h.version != 1) return Status::error("lkm: unsupported version " + std::to_string(h.version));
   // Overflow-safe: compare against the remaining space, never add untrusted sizes.
-  if (h.metaOffset > size || h.metaSize > size - h.metaOffset || h.dataOffset > size ||
-      h.dataSize > size - h.dataOffset)
+  if (h.metaOffset > size || h.metaSize > size - h.metaOffset ||
+      (!split && (h.dataOffset > size || h.dataSize > size - h.dataOffset)))
     return Status::error("lkm: truncated file");
   Reader r(base + h.metaOffset, h.metaSize);
   auto m = std::make_unique<Model>();
@@ -345,8 +356,15 @@ Expected<std::unique_ptr<Model>> decode(const uint8_t* base, size_t size, std::s
       }
       if (known && bytes != c.size) return Status::error("lkm: constant '" + c.name + "' size doesn't match its type");
     }
-    c.bytes = data + off;
-    c.owner = owner;
+    if (split) {
+      if (i >= split->size() || (*split)[i].size != c.size)
+        return Status::error("lkm: split constant '" + c.name + "' missing or of the wrong size");
+      c.bytes = (*split)[i].bytes;
+      c.owner = (*split)[i].owner;
+    } else {
+      c.bytes = data + off;
+      c.owner = owner;
+    }
     m->addConstant(std::move(c));
   }
   auto ids = [&](std::vector<ValueId>& v) {
@@ -354,6 +372,11 @@ Expected<std::unique_ptr<Model>> decode(const uint8_t* base, size_t size, std::s
   };
   for (Region* reg : {&m->init, &m->exec}) {
     ids(reg->args);
+    if (h.version >= 2) {
+      uint64_t n = r.count();
+      if (n != 0 && n != reg->args.size()) return Status::error("lkm: bad mutable-arg flags");
+      for (uint64_t k = 0; k < n && r.ok(); ++k) reg->mutableArgs.push_back(r.u8() != 0);
+    }
     ids(reg->state);
     for (uint64_t i = 0, n = r.count(); i < n && r.ok(); ++i) {
       Op op;
@@ -450,6 +473,31 @@ Expected<std::vector<uint8_t>> writeModelBytes(const Model& m) {
   return out;
 }
 
+Expected<LkmSplit> lkmSplit(const Model& m) {
+  for (const Region* r : {&m.init, &m.exec})
+    for (const Op& op : r->ops)
+      if (op.kind == OpKind::ConstExternal)
+        return Status::error("lkm: external constant '" + op.name + "' must be internalized before export");
+  Writer w;
+  std::vector<std::pair<const ConstantData*, uint64_t>> data;
+  LK_RETURN_IF_ERROR(ModelEncoder(m).encode(w, data));
+  Header h{};
+  std::memcpy(h.magic, kMagic, 4);
+  h.version = kVersion;
+  h.metaOffset = kHeaderSize;
+  h.metaSize = w.out.size();
+  h.dataOffset = alignUp(kHeaderSize + w.out.size(), kDataAlign);
+  uint64_t dataEnd = 0;
+  for (auto& [c, off] : data) dataEnd = std::max<uint64_t>(dataEnd, off + c->size);
+  h.dataSize = dataEnd;
+  LkmSplit s;
+  s.skeleton.assign(h.dataOffset, 0);  // as writeModelBytes: header, metadata, zero padding up to the data
+  std::memcpy(s.skeleton.data(), &h, sizeof h);
+  std::memcpy(s.skeleton.data() + kHeaderSize, w.out.data(), w.out.size());
+  for (auto& [c, off] : data) s.constants.emplace_back(c->size ? c->bytes : nullptr, c->size);
+  return s;
+}
+
 Expected<std::unique_ptr<Model>> readModelBytes(std::shared_ptr<const std::vector<uint8_t>> bytes) {
   const uint8_t* base = bytes->data();
   size_t n = bytes->size();
@@ -467,7 +515,10 @@ Status writeModelFile(const Model& m, const std::string& path) {
   return Status::ok();
 }
 
-Expected<std::unique_ptr<Model>> readModelFile(const std::string& path) {
+namespace {
+
+// Read-only private mapping of a whole file (page-aligned); an empty file maps to nothing.
+Expected<SplitConstant> mapFile(const std::string& path) {
   int fd = ::open(path.c_str(), O_RDONLY);
   if (fd < 0) return Status::error("cannot open " + path);
   struct stat st;
@@ -476,11 +527,51 @@ Expected<std::unique_ptr<Model>> readModelFile(const std::string& path) {
     return Status::error("cannot stat " + path);
   }
   size_t size = static_cast<size_t>(st.st_size);
-  void* p = size ? ::mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0) : MAP_FAILED;
+  if (size == 0) {
+    ::close(fd);
+    return SplitConstant{};
+  }
+  void* p = ::mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
   ::close(fd);
   if (p == MAP_FAILED) return Status::error("cannot mmap " + path);
   std::shared_ptr<const void> owner(p, [size](const void* q) { ::munmap(const_cast<void*>(q), size); });
-  return decode(static_cast<const uint8_t*>(p), size, std::move(owner));
+  return SplitConstant{static_cast<const uint8_t*>(p), size, std::move(owner)};
+}
+
+}  // namespace
+
+Expected<std::unique_ptr<Model>> readModelFile(const std::string& path) {
+  auto f = mapFile(path);
+  if (!f) return f.status();
+  if (!f->bytes) return Status::error("lkm: file too small");
+  return decode(f->bytes, f->size, f->owner);
+}
+
+Expected<std::vector<std::pair<uint64_t, uint64_t>>> lkmConstantRanges(const std::string& path) {
+  auto f = mapFile(path);
+  if (!f) return f.status();
+  if (!f->bytes) return Status::error("lkm: file too small");
+  auto m = decode(f->bytes, f->size, f->owner);
+  if (!m) return m.status();
+  std::vector<std::pair<uint64_t, uint64_t>> out;
+  for (const ConstantData& c : (*m)->constants)
+    out.emplace_back(c.size ? static_cast<uint64_t>(c.bytes - f->bytes) : 0, c.size);
+  return out;
+}
+
+Expected<std::unique_ptr<Model>> readModelSplit(const std::string& skeletonPath,
+                                                const std::vector<std::string>& constantPaths) {
+  auto sk = mapFile(skeletonPath);
+  if (!sk) return sk.status();
+  if (!sk->bytes) return Status::error("lkm: file too small");
+  std::vector<SplitConstant> split;
+  split.reserve(constantPaths.size());
+  for (const std::string& p : constantPaths) {
+    auto c = mapFile(p);
+    if (!c) return c.status();
+    split.push_back(std::move(*c));
+  }
+  return decode(sk->bytes, sk->size, sk->owner, &split);
 }
 
 }  // namespace lk

@@ -38,6 +38,24 @@ def _native_input(a):
     return a._t if isinstance(a, Tensor) else a
 
 
+def _native_mutable(a, idx: int):
+    """A mutable input (lk.MutableType): written in place, so it must be bound with no copy and no conversion."""
+    where = f"input {idx} is mutable (written in place)"
+    if isinstance(a, Tensor):
+        return a._t
+    if isinstance(a, np.ndarray):
+        if not a.flags.c_contiguous or not a.flags.writeable:
+            raise ValueError(f"{where}: numpy arrays must be C-contiguous and writeable (a copy would lose the writes)")
+        return from_numpy(a)._t
+    if hasattr(a, "__dlpack__"):
+        from .tensor import from_torch
+
+        if hasattr(a, "is_contiguous") and not a.is_contiguous():
+            raise ValueError(f"{where}: torch tensors must be contiguous")
+        return from_torch(a)._t
+    raise TypeError(f"{where}: needs an array / tensor, got {type(a).__name__}")
+
+
 def _native_output(o):
     """A caller-provided output: lokinfer Tensor, contiguous numpy array or torch tensor (CPU or MPS), never copied."""
     if o is None:
@@ -125,7 +143,10 @@ class CompiledModel:
         return len(self._externals)
 
     def _call(self, args, out):
-        native = [_native_input(a) for a in args]
+        from .types import BufferType
+
+        native = [_native_mutable(a, i) if i < len(self.input_types) and isinstance(self.input_types[i], BufferType)
+                  else _native_input(a) for i, a in enumerate(args)]
         outs = None
         if out is not None:
             given = [out] if self._single and not isinstance(out, (list, tuple)) else list(out)

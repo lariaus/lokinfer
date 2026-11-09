@@ -476,6 +476,60 @@ TEST_CASE("remote fuzz: malformed requests get errors and the session keeps serv
     b.put<uint32_t>(5000);
     cases.push_back({"RUN2 too many comparisons", 11, b.b});
   }
+  // Device tensors (ALLOC_TENSOR 12, WRITE_TENSOR 13, READ_TENSOR 14, FREE_TENSOR 15).
+  cases.push_back({"ALLOC_TENSOR empty", 12, {}});
+  cases.push_back({"ALLOC_TENSOR truncated shape", 12, Buf().put<uint32_t>(0).put<uint32_t>(2).put<int64_t>(4).b});
+  cases.push_back({"ALLOC_TENSOR trailing bytes", 12, Buf().put<uint32_t>(0).put<uint32_t>(1).put<int64_t>(4).put<uint8_t>(0).b});
+  cases.push_back({"ALLOC_TENSOR dtype 256", 12, Buf().put<uint32_t>(256).put<uint32_t>(1).put<int64_t>(4).b});
+  cases.push_back({"ALLOC_TENSOR ndim 17", 12, Buf().put<uint32_t>(0).put<uint32_t>(17).b});
+  cases.push_back({"ALLOC_TENSOR ndim 2^32-1", 12, Buf().put<uint32_t>(0).put<uint32_t>(0xffffffffu).b});
+  cases.push_back({"ALLOC_TENSOR negative dim", 12, Buf().put<uint32_t>(0).put<uint32_t>(2).put<int64_t>(4).put<int64_t>(-4).b});
+  cases.push_back({"ALLOC_TENSOR 2^62 elements", 12, Buf().put<uint32_t>(0).put<uint32_t>(2).put<int64_t>(int64_t(1) << 31).put<int64_t>(int64_t(1) << 31).b});
+  cases.push_back({"ALLOC_TENSOR overflowing dims", 12, Buf().put<uint32_t>(7).put<uint32_t>(3).put<int64_t>(INT64_MAX).put<int64_t>(INT64_MAX).put<int64_t>(2).b});
+  cases.push_back({"WRITE_TENSOR empty", 13, {}});
+  cases.push_back({"WRITE_TENSOR unknown handle", 13, [&] { Buf b; b.put<uint32_t>(999); tensor(b, 0, {4}, 16, 16); return b.b; }()});
+  cases.push_back({"READ_TENSOR empty", 14, {}});
+  cases.push_back({"READ_TENSOR unknown handle", 14, Buf().put<uint32_t>(0).b});
+  cases.push_back({"FREE_TENSOR empty", 15, {}});
+  cases.push_back({"FREE_TENSOR unknown handle", 15, Buf().put<uint32_t>(0xffffffffu).b});
+  cases.push_back({"RUN2 unknown device tensor", 11, run2Head(1).put<uint8_t>(3).put<uint32_t>(12345).b});
+  cases.push_back({"RUN2 truncated device tensor", 11, run2Head(1).put<uint8_t>(3).put<uint8_t>(1).b});
+  {
+    // A live device tensor of the wrong shape / dtype for the model; WRITE_TENSOR mismatches and garbage.
+    auto r = c.call(MsgType::AllocTensor, Buf().put<uint32_t>(0).put<uint32_t>(1).put<int64_t>(4).b);
+    REQUIRE(r);
+    REQUIRE(r->ok());
+    uint32_t h;
+    std::memcpy(&h, r->body.data(), 4);
+    auto w = [&](uint32_t dt, std::vector<int64_t> shape, uint64_t nbytes, size_t actual) {
+      Buf b;
+      b.put<uint32_t>(h);
+      tensor(b, dt, shape, nbytes, actual);
+      return b.b;
+    };
+    cases.push_back({"WRITE_TENSOR wrong shape", 13, w(0, {5}, 20, 20)});
+    cases.push_back({"WRITE_TENSOR wrong dtype", 13, w(6, {4}, 16, 16)});
+    cases.push_back({"WRITE_TENSOR scalar", 13, w(0, {}, 4, 4)});
+    cases.push_back({"WRITE_TENSOR byte count lies", 13, w(0, {4}, 1u << 30, 16)});
+    cases.push_back({"WRITE_TENSOR truncated data", 13, w(0, {4}, 16, 7)});
+    cases.push_back({"WRITE_TENSOR trailing bytes", 13, [&] { auto v = w(0, {4}, 16, 16); v.push_back(1); return v; }()});
+    cases.push_back({"RUN2 device tensor of the wrong dtype", 11, [&] {
+                       Buf b = run2Head(2);
+                       auto i32 = c.call(MsgType::AllocTensor, Buf().put<uint32_t>(6).put<uint32_t>(1).put<int64_t>(4).b);
+                       REQUIRE(i32);
+                       REQUIRE(i32->ok());
+                       b.put<uint8_t>(3).bytes(i32->body.data(), 4);
+                       b.put<uint8_t>(0);
+                       tensor(b, 0, {}, 4, 4);
+                       b.put<uint32_t>(0);
+                       return b.b;
+                     }()});
+    cases.push_back({"RUN2 device tensor, then a scalar of the wrong kind", 11, [&] {
+                       Buf b = run2Head(2);
+                       b.put<uint8_t>(3).put<uint32_t>(h).put<uint8_t>(3).put<uint32_t>(h).put<uint32_t>(0);
+                       return b.b;  // input 1 (an f32 scalar) given as an f32[4] device tensor
+                     }()});
+  }
 
   for (const Case& k : cases) {
     INFO(k.name);
@@ -507,8 +561,11 @@ TEST_CASE("remote fuzz: random and mutated frames never crash the session", "[re
     std::vector<uint8_t> p;
     const int mode = static_cast<int>(rng() % 3);
     if (mode == 0) {  // random type + random bytes
-      do type = static_cast<uint16_t>(rng() % 14);
-      while (type == static_cast<uint16_t>(MsgType::Shutdown));
+      // Every type except SHUTDOWN, BLOBS (could empty the blob store) and FREE_MODEL (could free the model checked
+      // at the end); PIN_MODEL (19) included.
+      do type = static_cast<uint16_t>(rng() % 20);
+      while (type == static_cast<uint16_t>(MsgType::Shutdown) || type == static_cast<uint16_t>(MsgType::Blobs) ||
+             type == static_cast<uint16_t>(MsgType::FreeModel));
       p.resize(rng() % 200);
       for (auto& b : p) b = static_cast<uint8_t>(rng());
       if (p.size() >= 4 && (rng() & 1)) std::memcpy(p.data(), &id, 4);  // often aim at the real model
@@ -585,6 +642,67 @@ TEST_CASE("remote fuzz: corrupted model blobs are rejected or run safely", "[rem
   INFO("loaded " << loaded << ", rejected " << rejected);
   REQUIRE(rejected > 0);
   checkHealthy(c, good);
+}
+
+TEST_CASE("remote fuzz: device tensor budget and handle churn", "[remote][fuzz]") {
+  Conn c;
+  const uint32_t id = loadModel(c);
+  auto alloc = [&](uint32_t dt, int64_t n) {
+    auto r = c.call(MsgType::AllocTensor, Buf().put<uint32_t>(dt).put<uint32_t>(1).put<int64_t>(n).b);
+    REQUIRE(r);
+    return r;
+  };
+  auto handle = [](const Reply& r) {
+    uint32_t h;
+    std::memcpy(&h, r.body.data(), 4);
+    return h;
+  };
+  // 4 GiB in all: two 2 GiB tensors fit (anonymous pages, never touched: no real memory), a third byte does not.
+  const int64_t before = physFootprint();
+  auto a = alloc(4, int64_t(1) << 31), b = alloc(4, int64_t(1) << 31);  // u8[2^31]
+  REQUIRE(a->ok());
+  REQUIRE(b->ok());
+  auto over = alloc(4, 1);
+  REQUIRE_FALSE(over->ok());
+  REQUIRE(over->text().find("too large") != std::string::npos);
+  REQUIRE(physFootprint() - before < (int64_t(64) << 20));
+  // Freeing gives the budget back; double free is an error.
+  REQUIRE(c.call(MsgType::FreeTensor, Buf().put<uint32_t>(handle(*a)).b)->ok());
+  REQUIRE_FALSE(c.call(MsgType::FreeTensor, Buf().put<uint32_t>(handle(*a)).b)->ok());
+  REQUIRE(c.call(MsgType::FreeTensor, Buf().put<uint32_t>(handle(*b)).b)->ok());
+  // At most 4096 live device tensors.
+  std::vector<uint32_t> hs;
+  for (int i = 0; i < 4096; ++i) {
+    auto r = alloc(0, 1);
+    REQUIRE(r->ok());
+    hs.push_back(handle(*r));
+  }
+  auto many = alloc(0, 1);
+  REQUIRE_FALSE(many->ok());
+  for (uint32_t h : hs) REQUIRE(c.call(MsgType::FreeTensor, Buf().put<uint32_t>(h).b)->ok());
+  // Round trip, then RUN2 binds it as an input (in place) and the model's output reads it.
+  auto x = alloc(0, 4);
+  REQUIRE(x->ok());
+  Buf w;
+  w.put<uint32_t>(handle(*x)).put<uint32_t>(0).put<uint32_t>(1).put<int64_t>(4).put<uint64_t>(16);
+  for (int i = 0; i < 4; ++i) w.put<float>(float(i + 1));
+  REQUIRE(c.call(MsgType::WriteTensor, w.b)->ok());
+  auto rd = c.call(MsgType::ReadTensor, Buf().put<uint32_t>(handle(*x)).b);
+  REQUIRE(rd);
+  REQUIRE(rd->ok());
+  REQUIRE(rd->body == std::vector<uint8_t>(w.b.begin() + 4, w.b.end()));
+  Buf run;
+  run.put<uint32_t>(id).put<uint32_t>(1).put<uint32_t>(2).put<uint32_t>(1).put<uint32_t>(2);
+  run.put<uint8_t>(3).put<uint32_t>(handle(*x));
+  run.put<uint8_t>(0).put<uint32_t>(0).put<uint32_t>(0).put<uint64_t>(4).put<float>(0.5f);
+  run.put<uint32_t>(0);
+  auto rr = c.call(MsgType::Run2, run.b);
+  REQUIRE(rr);
+  INFO(rr->text());
+  REQUIRE(rr->ok());
+  const float* o = reinterpret_cast<const float*>(rr->body.data() + 4 + 4 + 4 + 8 + 8);
+  for (int i = 0; i < 4; ++i) REQUIRE(o[i] == 2.f * float(i + 1) * float(i + 1));
+  checkHealthy(c, id);
 }
 
 TEST_CASE("remote: RUN2 with blob, generated and inline inputs and on-device comparisons", "[remote]") {

@@ -9,7 +9,7 @@ fastest other framework tested, on every device and input length measured.
 - Devices are explicit in the graph: a GPU model is GPU end to end, with Metal kernels written for it.
 - A Python layer (nanobind) to build, compile, run, save and load models; a C++ API to load and run saved models
   in an app.
-- f32 everywhere: results are compared with PyTorch at f32.
+- f32 everywhere (except Qwen3-ASR, f16 by design): results are compared with PyTorch at f32.
 
 Version **0.0.1** (see [Versions](#versions)).
 
@@ -41,6 +41,18 @@ the perf dashboard (`perf/index.html`, data in `perf/results.json`; see [docs/pe
 Kokoro audio quality was checked end to end against the reference Python implementation on 225 texts (one word to
 80 s, 10 voices): same durations, and the same spectral similarity as two runs of the reference implementation
 ([tests/e2e/kokoro/](tests/e2e/kokoro/README.md)).
+
+## In progress
+
+- **Qwen3-ASR-1.7B** (speech recognition, f16 on all four devices): the neural model (audio encoder, LM prefill and
+  decode with a caller-owned KV cache) runs on the Mac CPU and GPU and on the iPhone CPU and GPU, matching the
+  reference transcripts; its model tests pass on all four devices, and it is on the perf dashboard with its baselines
+  (torch, MLX, MLX Swift, llama.cpp). Phase 1 is complete (2026-11-07): lokinfer is ahead of the best baseline on all
+  four devices (geomean over the dashboard cases: Mac CPU 2.4×, Mac GPU 1.07×, iPhone CPU 2.0×, iPhone GPU 1.14×;
+  status, numbers and remaining gaps: [docs/models/qwen3-asr.md](docs/models/qwen3-asr.md)).
+- **Next: end-to-end speech-to-text** — audio in, text out, entirely in lokinfer (audio front end, tokenizer,
+  generation loop, a `speech-to-text` binary), faster end to end than the PyTorch / MLX pipelines. Designed, not
+  started: [docs/impl-notes/speech-to-text-design.md](docs/impl-notes/speech-to-text-design.md).
 
 ## Requirements
 
@@ -131,8 +143,9 @@ python -m pytest -q             # kernels, models, Python API, perf-dashboard go
 scripts/ios_deploy.sh           # the C++ tests on a connected iPhone
 ```
 
-Model tests compare against the PyTorch reference at f32; Kokoro also has free-running (random-phase) audio tests on
-real sentences in both app voices and extra voices.
+Model tests compare against the PyTorch reference at f32 (Qwen3-ASR, f16: against float64 goldens, bounded by
+PyTorch f16's own error, [docs/correctness-testing.md](docs/correctness-testing.md)); Kokoro also has free-running
+(random-phase) audio tests on real sentences in both app voices and extra voices.
 
 ## Repository layout
 
@@ -141,7 +154,7 @@ real sentences in both app voices and extra voices.
 | `include/`, `src/` | IR, verifier, compiler passes, runtime (CPU thread pool, Metal 4 GPU context), remote executor |
 | `kernels/` | CPU (NEON, SME2, Accelerate) and GPU (Metal) kernels |
 | `python/` | the Python package and its nanobind extension |
-| `models/` | model graphs: Kokoro-82M, GPT-2, ResNet-18, MobileNetV2, DCGAN, MNIST |
+| `models/` | model graphs: Kokoro-82M, Qwen3-ASR-1.7B, GPT-2, ResNet-18, MobileNetV2, DCGAN, MNIST |
 | `tests/` | unit, lit, Python, model, perf-goal and end-to-end tests |
 | `bench/`, `perf/` | benchmarks, baselines and the perf dashboard data |
 | `ios/` | the iOS test host (runs the C++ tests on the device, then serves as a remote executor) |

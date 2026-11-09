@@ -25,3 +25,8 @@ struct ElementwiseParams {
 
 LK_BINARY_F32(add_f32, x + y)
 LK_BINARY_F32(mul_f32, x * y)
+
+// Runtime sentinel (src/runtime/gpu.cpp endAndCommit): the last dispatch of every command buffer copies the segment's
+// marker; a failed (aborted) command buffer never writes it, so a call can tell success without waiting for Metal's
+// commit feedback (~50 us later than the completion event).
+kernel void lk_runtime_sentinel(device const uint* req [[buffer(0)]], device uint* res [[buffer(1)]]) { res[0] = req[0]; }

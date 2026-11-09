@@ -24,6 +24,7 @@
 // return.
 #include "lokinfer/ir/text.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cinttypes>
 #include <cmath>
@@ -115,7 +116,7 @@ class Printer {
     printOps(m_.init);
     out_ += "  }\n";
     out_ += "  exec(";
-    printArgList(m_.exec.args);
+    printArgList(m_.exec.args, &m_.exec);
     out_ += ")";
     if (!m_.exec.state.empty()) {
       out_ += " state(";
@@ -156,10 +157,11 @@ class Printer {
     return vs.size() == 1 ? s : s + ")";
   }
 
-  void printArgList(const std::vector<ValueId>& vs) {
+  void printArgList(const std::vector<ValueId>& vs, const Region* r = nullptr) {
     for (size_t i = 0; i < vs.size(); ++i) {
       if (i) out_ += ", ";
       out_ += name(vs[i]) + ": " + type(vs[i]);
+      if (r && r->isMutableArg(i)) out_ += " mutable";
     }
   }
 
@@ -307,7 +309,7 @@ class Parser {
     if (!expectWord("init") || !parseResultTypes(initTypes) || !expect("{")) return err();
     if (!parseOps(m_->init) || !checkResultTypes(m_->init, initTypes, "init")) return err();
     if (!expectWord("exec") || !expect("(")) return err();
-    if (!parseArgList(m_->exec.args)) return err();
+    if (!parseArgList(m_->exec.args, &m_->exec.mutableArgs)) return err();
     if (peekWord("state")) {
       expectWord("state");
       if (!expect("(") || !parseArgList(m_->exec.state)) return err();
@@ -536,8 +538,10 @@ class Parser {
     return true;
   }
 
-  bool parseArgList(std::vector<ValueId>& out) {
+  // `mutableFlags`: exec args only (`%kv: buffer<...> mutable`); filled only when some arg is mutable.
+  bool parseArgList(std::vector<ValueId>& out, std::vector<uint8_t>* mutableFlags = nullptr) {
     if (accept(")")) return true;
+    std::vector<uint8_t> flags;
     do {
       std::string n;
       Type t;
@@ -545,7 +549,14 @@ class Parser {
       ValueId id;
       if (!define(n, t, id)) return false;
       out.push_back(id);
+      bool mut = false;
+      if (mutableFlags && peekWord("mutable")) {
+        expectWord("mutable");
+        mut = true;
+      }
+      flags.push_back(mut);
     } while (accept(","));
+    if (mutableFlags && std::find(flags.begin(), flags.end(), 1) != flags.end()) *mutableFlags = std::move(flags);
     return expect(")");
   }
 

@@ -4,12 +4,20 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <mach/mach.h>
+#include <dispatch/dispatch.h>
+#include <TargetConditionals.h>
 #include <unistd.h>
+#if TARGET_OS_IPHONE
+#include <os/proc.h>
+#endif
 
 #include <algorithm>
+#include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <span>
@@ -19,12 +27,16 @@
 #include <filesystem>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "lokinfer/ir/binary.h"
 #include "lokinfer/ir/verify.h"
 #include "lokinfer/runtime/runtime.h"
 #include "../runtime/gpu_internal.h"
+
+#include <Foundation/Foundation.hpp>
+#include <Metal/Metal.hpp>
 
 namespace lk::remote {
 
@@ -124,9 +136,136 @@ bool validSha(const std::string& s) {
   return true;
 }
 
+
+// System memory pressure, process-wide (DISPATCH_SOURCE_TYPE_MEMORYPRESSURE: the level iOS / macOS signal to apps
+// before jetsam). The source only fires on transitions, so the level starts at "normal" (1). `events` counts the
+// warn / critical notifications since the process started (clients diff it around a timed region).
+struct PressureMonitor {
+  std::atomic<unsigned> level{DISPATCH_MEMORYPRESSURE_NORMAL};
+  std::atomic<uint64_t> events{0};
+  dispatch_source_t src = nullptr;
+  static void onEvent(void* ctx) {
+    auto* m = static_cast<PressureMonitor*>(ctx);
+    const unsigned l = static_cast<unsigned>(dispatch_source_get_data(m->src));
+    if (l & DISPATCH_MEMORYPRESSURE_CRITICAL) m->level = DISPATCH_MEMORYPRESSURE_CRITICAL;
+    else if (l & DISPATCH_MEMORYPRESSURE_WARN) m->level = DISPATCH_MEMORYPRESSURE_WARN;
+    else m->level = DISPATCH_MEMORYPRESSURE_NORMAL;
+    if (l & (DISPATCH_MEMORYPRESSURE_WARN | DISPATCH_MEMORYPRESSURE_CRITICAL)) ++m->events;
+  }
+  static PressureMonitor& get() {
+    static PressureMonitor* m = [] {
+      auto* p = new PressureMonitor;  // never destroyed: the source's handler may run at exit
+      p->src = dispatch_source_create(DISPATCH_SOURCE_TYPE_MEMORYPRESSURE, 0,
+                                      DISPATCH_MEMORYPRESSURE_NORMAL | DISPATCH_MEMORYPRESSURE_WARN |
+                                          DISPATCH_MEMORYPRESSURE_CRITICAL,
+                                      dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
+      if (p->src) {
+        dispatch_set_context(p->src, p);
+        dispatch_source_set_event_handler_f(p->src, &PressureMonitor::onEvent);
+        dispatch_activate(p->src);
+      }
+      return p;
+    }();
+    return *m;
+  }
+  static const char* name(unsigned l) {
+    return l == DISPATCH_MEMORYPRESSURE_CRITICAL ? "critical" : l == DISPATCH_MEMORYPRESSURE_WARN ? "warn" : "normal";
+  }
+};
+
+// The page-aligned ranges of a model's constants (memory-mapped blobs / .lkm), for mincore / mlock / madvise.
+std::vector<std::pair<uintptr_t, size_t>> constantPages(const Model& m) {
+  const uintptr_t pg = static_cast<uintptr_t>(getpagesize());
+  std::vector<std::pair<uintptr_t, size_t>> r;
+  for (const ConstantData& c : m.constants) {
+    if (!c.bytes || !c.size) continue;
+    const uintptr_t a = reinterpret_cast<uintptr_t>(c.bytes) & ~(pg - 1);
+    const uintptr_t e = (reinterpret_cast<uintptr_t>(c.bytes) + c.size + pg - 1) & ~(pg - 1);
+    r.emplace_back(a, e - a);
+  }
+  std::sort(r.begin(), r.end());
+  std::vector<std::pair<uintptr_t, size_t>> merged;  // constants of one whole-.lkm mapping can share pages
+  for (const auto& [a, n] : r) {
+    if (!merged.empty() && a <= merged.back().first + merged.back().second) {
+      merged.back().second = std::max(merged.back().second, a + n - merged.back().first);
+    } else {
+      merged.emplace_back(a, n);
+    }
+  }
+  return merged;
+}
+
+// Resident bytes of the ranges (mincore, in 64 MiB steps).
+uint64_t residentBytes(const std::vector<std::pair<uintptr_t, size_t>>& ranges) {
+  const size_t pg = static_cast<size_t>(getpagesize());
+  std::vector<char> vec;
+  uint64_t res = 0;
+  for (const auto& [a, n] : ranges) {
+    for (size_t off = 0; off < n; off += size_t(64) << 20) {
+      const size_t len = std::min(n - off, size_t(64) << 20);
+      vec.assign(len / pg, 0);
+      if (::mincore(reinterpret_cast<void*>(a + off), len, vec.data()) != 0) continue;
+      for (char v : vec) res += (v & MINCORE_INCORE) ? pg : 0;
+    }
+  }
+  return res;
+}
+
+// PIN_MODEL mode 3: no-copy MTLBuffers over the pages in a residency set of their own, committed and kept resident
+// with requestResidency() until dropped (endResidency). Resident Metal memory is wired by the kernel without being
+// charged to the app's phys_footprint. Adding the buffers to the GPU queue's shared set was not enough (iPhone
+// 2026-11-07): that set is only made resident while GPU work runs, so a CPU-only model's pages still got evicted.
+struct GpuPinSet {
+  MTL::ResidencySet* set = nullptr;
+  std::vector<MTL::Buffer*> buffers;
+  ~GpuPinSet() {
+    if (set) {
+      set->endResidency();
+      set->removeAllAllocations();
+      set->commit();
+      set->release();
+    }
+    for (MTL::Buffer* b : buffers) b->release();
+  }
+};
+
+std::unique_ptr<GpuPinSet> gpuPin(const std::vector<std::pair<uintptr_t, size_t>>& ranges, std::string& err) {
+  auto g = rt::GpuContext::shared();
+  if (!g) {
+    err = g.status().message();
+    return nullptr;
+  }
+  NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
+  MTL::Device* dev = (*g)->device();
+  auto pin = std::make_unique<GpuPinSet>();
+  MTL::ResidencySetDescriptor* d = MTL::ResidencySetDescriptor::alloc()->init();
+  d->setInitialCapacity(ranges.size());
+  NS::Error* e = nullptr;
+  pin->set = dev->newResidencySet(d, &e);
+  d->release();
+  if (!pin->set) err = "newResidencySet failed";
+  for (const auto& [a, n] : ranges) {
+    if (!err.empty()) break;
+    MTL::Buffer* b = dev->newBuffer(reinterpret_cast<void*>(a), n, MTL::ResourceStorageModeShared, nullptr);
+    if (!b) {
+      err = "newBufferWithBytesNoCopy failed";
+      break;
+    }
+    pin->buffers.push_back(b);
+    pin->set->addAllocation(b);
+  }
+  if (err.empty()) {
+    pin->set->commit();
+    pin->set->requestResidency();
+  }
+  pool->release();
+  if (!err.empty()) return nullptr;  // the destructor undoes the partial set
+  return pin;
+}
+
 class Session {
  public:
-  Session(const ServerOptions& o) : opts_(o) {}
+  Session(const ServerOptions& o) : opts_(o) { PressureMonitor::get(); }
 
   // Returns false to stop the server.
   bool serve(int fd) {
@@ -170,7 +309,7 @@ class Session {
         // Advertise the optional messages (clients of older servers see no "features").
         if (size_t close = info.rfind('}'); close != std::string::npos) {
           bool empty = info.find_first_not_of(" \t\n{", info.find('{') + 1) == close;
-          info.insert(close, std::string(empty ? "" : ",") + "\"features\":[\"profile\",\"gpu_inspect\",\"memory\",\"run2\"]");
+          info.insert(close, std::string(empty ? "" : ",") + "\"features\":[\"profile\",\"gpu_inspect\",\"memory\",\"run2\",\"device_tensors\",\"split_models\",\"blobs\",\"blobs_query\",\"free_model\",\"memory_pressure\",\"pin_model\"]");
         }
         out.bytes(info.data(), info.size());
         return Status::ok();
@@ -197,20 +336,39 @@ class Session {
         if (!ok || std::rename(tmp.c_str(), blobPath(sha).c_str()) != 0) return Status::error("cannot store blob");
         return Status::ok();
       }
-      case MsgType::LoadModel: {
-        // sha256hex, then optionally i32 gpu_replay (RuntimeOptions::gpuReplay: -1 env, 0 off, 1 on) and
+      case MsgType::LoadModel:
+      case MsgType::LoadModelSplit: {
+        // LoadModel: sha256hex of a whole .lkm blob. LoadModelSplit: sha256hex of the skeleton blob, u32 n, then n
+        // sha256hex of the constants' blobs (readModelSplit: weights cached on the device independently of the
+        // graph). Then, for both, optionally i32 gpu_replay (RuntimeOptions::gpuReplay: -1 env, 0 off, 1 on) and
         // u32 gpu_segments (0 = unchanged; else GpuContext::setMaxSegments, process-wide).
-        if (payload.size() != 64 && payload.size() != 68 && payload.size() != 72) return Status::error("bad sha");
+        const bool split = t == MsgType::LoadModelSplit;
+        size_t head = 64;
+        std::vector<std::string> constPaths;
+        if (split) {
+          if (payload.size() < 68) return Status::error("bad LOAD_MODEL_SPLIT");
+          In cnt{payload.data() + 64, payload.data() + 68};
+          const uint32_t n = cnt.get<uint32_t>();
+          if (n > (payload.size() - 68) / 64) return Status::error("bad LOAD_MODEL_SPLIT");
+          for (uint32_t i = 0; i < n; ++i) {
+            std::string c(payload.begin() + 68 + 64 * i, payload.begin() + 68 + 64 * (i + 1));
+            if (!validSha(c)) return Status::error("bad constant sha");
+            constPaths.push_back(blobPath(c));
+          }
+          head = 68 + 64 * size_t(n);
+        }
+        if (payload.size() != head && payload.size() != head + 4 && payload.size() != head + 8)
+          return Status::error("bad sha");
         std::string sha(payload.begin(), payload.begin() + 64);
         if (!validSha(sha)) return Status::error("bad sha");
         rt::RuntimeOptions ro;
-        In opt{payload.data() + 64, payload.data() + payload.size()};
-        if (payload.size() >= 68) {
+        In opt{payload.data() + head, payload.data() + payload.size()};
+        if (payload.size() >= head + 4) {
           const int32_t replay = opt.get<int32_t>();
           if (replay < -1 || replay > 1) return Status::error("bad LOAD_MODEL gpu_replay");
           ro.gpuReplay = replay;
         }
-        if (payload.size() == 72) {
+        if (payload.size() == head + 8) {
           const uint32_t segs = opt.get<uint32_t>();
           if (segs > 4) return Status::error("bad LOAD_MODEL gpu_segments");
           if (segs) {
@@ -219,13 +377,14 @@ class Session {
             (*g)->setMaxSegments(segs);
           }
         }
-        auto m = readModelFile(blobPath(sha));
+        auto m = split ? readModelSplit(blobPath(sha), constPaths) : readModelFile(blobPath(sha));
         if (!m) return m.status();
         LK_RETURN_IF_ERROR(verifyModel(**m, VerifyOptions{true}));  // never execute unverified IR
         std::shared_ptr<Model> model(m.take());
         auto e = rt::Executable::create(model, {}, ro);
         if (!e) return e.status();
         uint32_t id = nextId_++;
+        weights_[id] = Weights{constantPages(*model), 0};
         models_[id] = e.take();
         out.put<uint32_t>(id);
         return Status::ok();
@@ -251,7 +410,14 @@ class Session {
       }
       case MsgType::GpuInspect: return gpuInspect(payload, out);
       case MsgType::Memory: return memory(payload, out);
+      case MsgType::Blobs: return blobs(payload, out);
+      case MsgType::FreeModel: return freeModel(payload);
+      case MsgType::PinModel: return pinModel(in, out);
       case MsgType::Run2: return run2(in, out);
+      case MsgType::AllocTensor: return allocTensor(in, out);
+      case MsgType::WriteTensor: return writeTensor(in);
+      case MsgType::ReadTensor: return readTensor(in, out);
+      case MsgType::FreeTensor: return freeTensor(in);
     }
     return Status::error("unknown message type");
   }
@@ -378,7 +544,10 @@ class Session {
     if (it == models_.end()) return Status::error("unknown model id");
     std::vector<rt::TensorView> views(n);
     std::vector<int64_t> scalars(n);
-    for (uint32_t i = 0; i < n; ++i) LK_RETURN_IF_ERROR(parseTensor(in, views[i], scalars[i]));
+    for (uint32_t i = 0; i < n; ++i) {
+      LK_RETURN_IF_ERROR(mutableNeedsDeviceTensor(*it->second, i));
+      LK_RETURN_IF_ERROR(parseTensor(in, views[i], scalars[i]));
+    }
     std::vector<rt::OwnedTensor> outs;
     std::vector<double> times;
     LK_RETURN_IF_ERROR(runCalls(*it->second, views, warmup, iters, outs, times));
@@ -439,6 +608,7 @@ class Session {
     for (uint32_t i = 0; i < n; ++i) {
       const uint8_t kind = in.get<uint8_t>();
       if (!in.ok) return Status::error("truncated RUN2 input");
+      if (kind != 3) LK_RETURN_IF_ERROR(mutableNeedsDeviceTensor(*it->second, i));
       if (kind == 0) {
         LK_RETURN_IF_ERROR(parseTensor(in, views[i], scalars[i]));
       } else if (kind == 1) {
@@ -447,6 +617,14 @@ class Session {
         LK_RETURN_IF_ERROR(tensorFromBlob(std::string(sha, sha + 64), keep, views[i], scalars[i]));
       } else if (kind == 2) {
         LK_RETURN_IF_ERROR(generateTensor(in, views[i], scalars[i], generated));
+      } else if (kind == 3) {
+        // A device tensor, bound in place: the view points at its memory, with its owner (runCalls never copies an
+        // owned view; GPU models wrap it with no copy, cached across calls since the owner stays the same).
+        const uint32_t h = in.get<uint32_t>();
+        if (!in.ok) return Status::error("truncated RUN2 input");
+        auto dt = tensors_.find(h);
+        if (dt == tensors_.end()) return Status::error("unknown device tensor " + std::to_string(h));
+        views[i] = rt::TensorView{dt->second.mem.get(), dt->second.dtype, dt->second.shape, nullptr, 0, dt->second.mem};
       } else {
         return Status::error("bad RUN2 input kind");
       }
@@ -614,6 +792,220 @@ class Session {
     return Status::ok();
   }
 
+  // A mutable exec arg (`buffer<...> mutable`) is written in place: on a copy of an inline / blob / generated input
+  // the writes would be lost, so it must be a device tensor (RUN2 input kind 3).
+  static Status mutableNeedsDeviceTensor(const rt::Executable& e, uint32_t i) {
+    if (e.model().exec.isMutableArg(i))
+      return Status::error("input " + std::to_string(i) + " is mutable: pass a device tensor");
+    return Status::ok();
+  }
+
+  // ---- Device tensors (ALLOC_TENSOR / WRITE_TENSOR / READ_TENSOR / FREE_TENSOR): server-owned, zeroed,
+  // page-aligned memory that RUN2 binds in place (mutable inputs such as a KV cache live here across calls).
+  static constexpr uint64_t kMaxDeviceTensorBytes = uint64_t(4) << 30;  // all live device tensors together
+  static constexpr size_t kMaxDeviceTensors = 4096;
+
+  struct DeviceTensor {
+    DType dtype;
+    std::vector<int64_t> shape;
+    uint64_t bytes;
+    std::shared_ptr<void> mem;  // also the views' owner
+  };
+
+  // u32 dtype, u32 ndim, i64 shape[ndim] -> u32 handle
+  Status allocTensor(In& in, Out& out) {
+    const uint32_t rawDt = in.get<uint32_t>(), ndim = in.get<uint32_t>();
+    if (!in.ok || ndim > 16 || rawDt > static_cast<uint32_t>(DType::Bool)) return Status::error("bad ALLOC_TENSOR");
+    std::vector<int64_t> shape(ndim);
+    for (auto& d : shape) d = in.get<int64_t>();
+    if (!in.ok || in.p != in.end) return Status::error("bad ALLOC_TENSOR");
+    const auto dt = static_cast<DType>(rawDt);
+    uint64_t bytes = 0;
+    LK_RETURN_IF_ERROR(byteCount(dt, shape, bytes));
+    if (tensors_.size() >= kMaxDeviceTensors) return Status::error("too many device tensors");
+    if (bytes > kMaxDeviceTensorBytes - deviceTensorBytes_) return Status::error("device tensors too large");
+    // Anonymous pages: zeroed, page-aligned, committed only when touched; the length is a whole number of 16 KiB
+    // pages so GPU models can wrap it with no copy.
+    const size_t len = static_cast<size_t>((std::max<uint64_t>(bytes, 1) + 16383) / 16384 * 16384);
+    void* p = ::mmap(nullptr, len, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (p == MAP_FAILED) return Status::error("out of memory");
+    const uint32_t h = nextTensor_++;
+    tensors_[h] = DeviceTensor{dt, std::move(shape), bytes, std::shared_ptr<void>(p, [len](void* q) { ::munmap(q, len); })};
+    deviceTensorBytes_ += bytes;
+    out.put<uint32_t>(h);
+    return Status::ok();
+  }
+
+  Expected<DeviceTensor*> deviceTensor(In& in, const char* what) {
+    const uint32_t h = in.get<uint32_t>();
+    if (!in.ok) return Status::error(std::string("bad ") + what);
+    auto it = tensors_.find(h);
+    if (it == tensors_.end()) return Status::error("unknown device tensor " + std::to_string(h));
+    return &it->second;
+  }
+
+  // u32 handle, tensor (same dtype and shape) -> copied in
+  Status writeTensor(In& in) {
+    auto t = deviceTensor(in, "WRITE_TENSOR");
+    if (!t) return t.status();
+    rt::TensorView v;
+    int64_t scalar = 0;
+    LK_RETURN_IF_ERROR(parseTensor(in, v, scalar));
+    if (in.p != in.end) return Status::error("WRITE_TENSOR has trailing bytes");
+    if (v.dtype != (*t)->dtype || v.shape != (*t)->shape)
+      return Status::error("WRITE_TENSOR: dtype or shape differs from the device tensor's");
+    if ((*t)->bytes) std::memcpy((*t)->mem.get(), v.data, static_cast<size_t>((*t)->bytes));
+    return Status::ok();
+  }
+
+  // u32 handle -> tensor
+  Status readTensor(In& in, Out& out) {
+    auto t = deviceTensor(in, "READ_TENSOR");
+    if (!t) return t.status();
+    if (in.p != in.end) return Status::error("bad READ_TENSOR");
+    const DeviceTensor& d = **t;
+    out.put<uint32_t>(static_cast<uint32_t>(d.dtype));
+    out.put<uint32_t>(static_cast<uint32_t>(d.shape.size()));
+    for (int64_t x : d.shape) out.put<int64_t>(x);
+    out.put<uint64_t>(d.bytes);
+    out.bytes(d.mem.get(), static_cast<size_t>(d.bytes));
+    return Status::ok();
+  }
+
+  // u32 handle. The memory goes once nothing uses it (a GPU model keeps its no-copy wrap until it binds other memory).
+  Status freeTensor(In& in) {
+    const uint32_t h = in.get<uint32_t>();
+    if (!in.ok || in.p != in.end) return Status::error("bad FREE_TENSOR");
+    auto it = tensors_.find(h);
+    if (it == tensors_.end()) return Status::error("unknown device tensor " + std::to_string(h));
+    deviceTensorBytes_ -= it->second.bytes;
+    tensors_.erase(it);
+    if (auto g = rt::GpuContext::existing()) g->trim();
+    return Status::ok();
+  }
+
+  // FREE_MODEL: u32 id. Frees one model of this connection now (the test harness frees each test's models: a long
+  // --device=iphone session used to keep them all until disconnect and iOS killed LokiHost, 2026-11-06).
+  Status freeModel(const std::vector<uint8_t>& payload) {
+    In in{payload.data(), payload.data() + payload.size()};
+    const uint32_t id = in.get<uint32_t>();
+    if (!in.ok || in.p != in.end) return Status::error("bad FREE_MODEL");
+    auto it = models_.find(id);
+    if (it == models_.end()) return Status::error("unknown model " + std::to_string(id));
+    if (auto g = rt::GpuContext::existing()) g->commitAndWait();
+    weights_.erase(id);  // first: mode-3 buffers over the mapping go before it (munmap also drops mlocks)
+    models_.erase(it);
+    if (auto g = rt::GpuContext::existing()) g->trim();
+    return Status::ok();
+  }
+
+  // PIN_MODEL: u32 id, u32 mode. Keeps a model's memory-mapped weights in RAM so a step never re-reads them from
+  // flash under memory pressure (docs/todo.md "fc-thrashing"): 0 = munlock (back to plain file-backed pages),
+  // 1 = madvise(MADV_WILLNEED) (read ahead now; no protection afterwards), 2 = mlock (wired: iOS can't evict them;
+  // measured on the iPhone 2026-11-07: wired pages count in phys_footprint, i.e. against the app's jetsam limit).
+  // 3 = GPU residency (gpuPin: a residency set of its own, requestResidency: Metal wires resident memory without
+  // charging phys_footprint; the GPU graphs' weights, held resident by the queue's set while they run, never
+  // thrashed under a 3.5 GB balloon). 0 also drops mode 3's set; mode 3 replaces an earlier mode-3 set.
+  // -> JSON {"bytes", "resident", "locked", "error"} (error = the first failure's strerror, "" if none; locked = the
+  // bytes this model has wired after the call, by mode 2 or 3).
+  Status pinModel(In& in, Out& out) {
+    const uint32_t id = in.get<uint32_t>(), mode = in.get<uint32_t>();
+    if (!in.ok || in.p != in.end || mode > 3) return Status::error("bad PIN_MODEL");
+    auto it = weights_.find(id);
+    if (it == weights_.end()) return Status::error("unknown model " + std::to_string(id));
+    Weights& w = it->second;
+    std::string err;
+    uint64_t total = 0, locked = 0;
+    if (mode == 0 || mode == 3) {
+      w.gpuPin.reset();
+      if (mode == 0) w.locked = 0;
+    }
+    if (mode == 3) {
+      for (const auto& r : w.ranges) total += r.second;
+      w.gpuPin = gpuPin(w.ranges, err);
+      w.locked = w.gpuPin ? total : 0;
+    }
+    for (const auto& [a, n] : mode == 3 ? decltype(w.ranges){} : w.ranges) {
+      void* p = reinterpret_cast<void*>(a);
+      total += n;
+      int rc = 0;
+      if (mode == 0) rc = ::munlock(p, n);
+      else if (mode == 1) rc = ::madvise(p, n, MADV_WILLNEED);
+      else if ((rc = ::mlock(p, n)) == 0) locked += n;
+      if (rc != 0 && err.empty()) err = std::strerror(errno);
+    }
+    if (mode == 0) w.locked = 0;
+    if (mode == 2) {
+      if (!err.empty()) {  // all or nothing: a partial lock would only hide the failure
+        for (const auto& [a, n] : w.ranges) ::munlock(reinterpret_cast<void*>(a), n);
+        locked = 0;
+      }
+      w.locked = locked;
+    }
+    const std::string j = "{\"bytes\":" + std::to_string(total) + ",\"resident\":" + std::to_string(residentBytes(w.ranges)) +
+                          ",\"locked\":" + std::to_string(w.locked) + ",\"error\":\"" + err + "\"}";
+    out.bytes(j.data(), j.size());
+    return Status::ok();
+  }
+
+  // BLOBS: u8 mode, u32 n, n x sha256hex. Reports the store ({"count","bytes"}, content blobs only: files named by a
+  // valid sha256, plus leftover ".tmp" uploads) after mode 1 removed every such file not in the list (keep list) or
+  // mode 2 removed the listed blobs ({"removed","removed_bytes"}); mode 0 only reports. Mode 3 answers "which of these
+  // are stored" in one round trip: n bytes, 1 / 0 (a cached model load was 226 HAS_BLOB round trips); feature
+  // "blobs_query" (added after "blobs": a server with "blobs" alone rejects mode 3). Loaded models keep working: their mmaps outlive the unlinked files. The
+  // phone accumulates superseded weights and whole-model blobs across sessions (2026-11-06: ~8 GB).
+  Status blobs(const std::vector<uint8_t>& payload, Out& out) {
+    if (payload.size() < 5) return Status::error("bad BLOBS");
+    In in{payload.data(), payload.data() + payload.size()};
+    const uint8_t mode = in.get<uint8_t>();
+    if (mode > 3) return Status::error("bad BLOBS mode");
+    const bool clear = mode != 0;
+    const uint32_t n = in.get<uint32_t>();
+    if (!in.ok || n > (payload.size() - 5) / 64 || payload.size() != 5 + size_t(n) * 64)
+      return Status::error("bad BLOBS");
+    if (mode == 3) {
+      std::vector<uint8_t> have(n);
+      for (uint32_t i = 0; i < n; ++i) {
+        std::string sha(reinterpret_cast<const char*>(payload.data()) + 5 + i * 64, 64);
+        std::error_code e;
+        have[i] = validSha(sha) && std::filesystem::exists(blobPath(sha), e) ? 1 : 0;
+      }
+      out.bytes(have.data(), have.size());
+      return Status::ok();
+    }
+    std::unordered_set<std::string> listed;
+    for (uint32_t i = 0; i < n; ++i) listed.emplace(reinterpret_cast<const char*>(payload.data()) + 5 + i * 64, 64);
+    uint64_t count = 0, bytes = 0, removed = 0, removedBytes = 0;
+    std::error_code ec;
+    std::vector<std::filesystem::path> doomed;
+    for (auto it = std::filesystem::directory_iterator(opts_.blobDir, ec);
+         !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+      const std::string name = it->path().filename().string();
+      const bool tmp = name.size() == 68 && name.compare(64, 4, ".tmp") == 0 && validSha(name.substr(0, 64));
+      if (!tmp && !validSha(name)) continue;
+      std::error_code e2;
+      const uint64_t sz = it->file_size(e2);
+      if (e2) continue;
+      if ((mode == 1 && (tmp || !listed.count(name))) || (mode == 2 && listed.count(name))) {
+        doomed.push_back(it->path());
+        removedBytes += sz;
+        ++removed;
+      } else {
+        bytes += sz;
+        ++count;
+      }
+    }
+    for (const auto& p : doomed) std::filesystem::remove(p, ec);
+    if (clear) {
+      tensorCache_.clear();
+      tensorCacheBytes_ = 0;
+    }
+    std::string json = "{\"count\":" + std::to_string(count) + ",\"bytes\":" + std::to_string(bytes) +
+                       ",\"removed\":" + std::to_string(removed) + ",\"removed_bytes\":" + std::to_string(removedBytes) + "}";
+    out.bytes(json.data(), json.size());
+    return Status::ok();
+  }
+
   // MEMORY: process memory (task_vm_info) and the Metal device's allocated size, as JSON.
   Status memory(const std::vector<uint8_t>& payload, Out& out) {
     if (!payload.empty()) return Status::error("bad MEMORY");
@@ -626,16 +1018,86 @@ class Session {
                           ",\"resident\":" + std::to_string(info.resident_size) +
                           ",\"resident_peak\":" + std::to_string(info.resident_size_peak) +
                           ",\"gpu_allocated\":" + std::to_string(rt::gpuAllocatedBytes()) +
-                          ",\"models\":" + std::to_string(models_.size()) + "}";
+                          ",\"models\":" + std::to_string(models_.size()) +
+                          ",\"device_tensors\":" + std::to_string(tensors_.size()) +
+                          ",\"device_tensor_bytes\":" + std::to_string(deviceTensorBytes_) + pressureJson() + "}";
     out.bytes(j.data(), j.size());
     return Status::ok();
   }
 
+  // MEMORY's pressure fields (feature "memory_pressure"): what the client needs to tell "the phone is short of RAM"
+  // from a slow kernel. available = os_proc_available_memory() (iOS: bytes left before this app's jetsam limit; -1
+  // on macOS); pressure = the system level from the dispatch memory-pressure source ("normal" / "warn" /
+  // "critical") and pressure_events (warn / critical notifications so far); pageins = this process's page-ins so
+  // far (task_events_info: a mapped weight re-read from flash is one; diff around a timed region: 0 when warm);
+  // weights / weights_resident = the loaded models' mapped constants and how much of them is in RAM (mincore; a
+  // CPU and a GPU graph over the same blobs count twice), weights_locked = bytes wired by PIN_MODEL; system_* =
+  // host_statistics64 pages in bytes (free, the file-backed cache, the compressor's).
+  std::string pressureJson() {
+    auto& pm = PressureMonitor::get();
+    int64_t avail = -1;
+#if TARGET_OS_IPHONE
+    avail = static_cast<int64_t>(os_proc_available_memory());
+#endif
+    task_events_info_data_t ev{};
+    mach_msg_type_number_t evCount = TASK_EVENTS_INFO_COUNT;
+    uint64_t pageins = 0;
+    if (task_info(mach_task_self(), TASK_EVENTS_INFO, reinterpret_cast<task_info_t>(&ev), &evCount) == KERN_SUCCESS)
+      pageins = static_cast<uint64_t>(ev.pageins);
+    uint64_t wBytes = 0, wRes = 0, wLocked = 0;
+    for (const auto& [id, w] : weights_) {
+      for (const auto& r : w.ranges) wBytes += r.second;
+      wRes += residentBytes(w.ranges);
+      wLocked += w.locked;
+    }
+    std::string sys;
+    vm_statistics64_data_t vs{};
+    mach_msg_type_number_t vsCount = HOST_VM_INFO64_COUNT;
+    if (host_statistics64(mach_host_self(), HOST_VM_INFO64, reinterpret_cast<host_info64_t>(&vs), &vsCount) ==
+        KERN_SUCCESS) {
+      const uint64_t pg = static_cast<uint64_t>(vm_kernel_page_size);
+      sys = ",\"system_free\":" + std::to_string(uint64_t(vs.free_count) * pg) +
+            ",\"system_file_backed\":" + std::to_string(uint64_t(vs.external_page_count) * pg) +
+            ",\"system_compressor\":" + std::to_string(uint64_t(vs.compressor_page_count) * pg) +
+            ",\"system_wired\":" + std::to_string(uint64_t(vs.wire_count) * pg);
+    }
+    return ",\"available\":" + std::to_string(avail) + ",\"pressure\":\"" + PressureMonitor::name(pm.level.load()) +
+           "\",\"pressure_events\":" + std::to_string(pm.events.load()) + ",\"pageins\":" + std::to_string(pageins) +
+           ",\"page_size\":" + std::to_string(getpagesize()) + ",\"weights\":" + std::to_string(wBytes) +
+           ",\"weights_resident\":" + std::to_string(wRes) + ",\"weights_locked\":" + std::to_string(wLocked) + sys;
+  }
+
   std::unordered_map<std::string, std::shared_ptr<const std::vector<uint8_t>>> tensorCache_;
   size_t tensorCacheBytes_ = 0;
+
+ public:
+  // A client's models and device tensors end with its connection (2026-11-06: they used to accumulate across
+  // clients; with Qwen3-ASR's activation arenas, a test run + a bench on the phone ran into GPU timeouts). Model and
+  // tensor ids are never reused, so a stale id from an earlier client fails cleanly. The blob store stays.
+  size_t endClient() {
+    const size_t n = models_.size() + tensors_.size();
+    if (auto g = rt::GpuContext::existing()) g->commitAndWait();
+    weights_.clear();
+    models_.clear();
+    tensors_.clear();
+    deviceTensorBytes_ = 0;
+    if (auto g = rt::GpuContext::existing()) g->trim();  // the freed buffers leave the residency set now
+    return n;
+  }
+
+ private:
   const ServerOptions& opts_;
   std::unordered_map<uint32_t, std::unique_ptr<rt::Executable>> models_;
+  struct Weights {
+    std::vector<std::pair<uintptr_t, size_t>> ranges;  // the model's mapped constants, page-aligned
+    uint64_t locked = 0;                               // bytes wired by PIN_MODEL mode 2 / 3
+    std::unique_ptr<GpuPinSet> gpuPin;                 // mode 3's residency set
+  };
+  std::unordered_map<uint32_t, Weights> weights_;
   uint32_t nextId_ = 1;
+  std::unordered_map<uint32_t, DeviceTensor> tensors_;
+  uint64_t deviceTensorBytes_ = 0;
+  uint32_t nextTensor_ = 1;
 };
 
 }  // namespace
@@ -681,6 +1143,8 @@ Status runServer(const ServerOptions& opts) {
     if (opts.verbose) std::printf("client connected\n"), std::fflush(stdout);
     keepGoing = session.serve(c);
     ::close(c);
+    const size_t freed = session.endClient();
+    if (opts.verbose) std::printf("client disconnected (%zu models / tensors freed)\n", freed), std::fflush(stdout);
   }
   ::close(fd);
   return Status::ok();

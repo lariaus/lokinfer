@@ -45,7 +45,8 @@ class Verifier {
     std::fill(defined_.begin(), defined_.end(), 0);
     for (ValueId v : m_.exec.args) LK_RETURN_IF_ERROR(define(v, "exec argument"));
     for (ValueId v : m_.exec.state) LK_RETURN_IF_ERROR(define(v, "exec state"));
-    return region(m_.exec, "exec");
+    LK_RETURN_IF_ERROR(region(m_.exec, "exec"));
+    return mutability();
   }
 
  private:
@@ -55,6 +56,60 @@ class Verifier {
       if ((op.kind == OpKind::Kernel && !op.outs.empty()) || op.kind == OpKind::BufferFree || op.kind == OpKind::MemPlan)
         return true;
     return false;
+  }
+
+  // In-place writes (`inout`) may only target memory that is meant to change: a mutable exec input (the caller's
+  // buffer, e.g. a KV cache) or a persistent buffer (model state). Neither may be returned: a mutable input stays the
+  // caller's, persistent state stays the model's. Roots are followed through views and syncs.
+  Status mutability() {
+    const Region& r = m_.exec;
+    if (!r.mutableArgs.empty() && r.mutableArgs.size() != r.args.size())
+      return fail("exec: mutable flags (" + std::to_string(r.mutableArgs.size()) + ") != args (" +
+                  std::to_string(r.args.size()) + ")");
+    std::vector<ValueId> root(m_.numValues(), kNoValue);
+    auto rootOf = [&](ValueId v) { return root[v] == kNoValue ? v : root[v]; };
+    std::vector<uint8_t> writable(m_.numValues(), 0);  // 1 = mutable arg, 2 = persistent alloc / state
+    // hoist-init moves persistent allocs into init: exec state is writable iff init returns a persistent alloc (or
+    // a view of one) there; the other state (hoisted weights) stays immutable.
+    {
+      std::vector<ValueId> iroot(m_.numValues(), kNoValue);
+      auto irootOf = [&](ValueId v) { return iroot[v] == kNoValue ? v : iroot[v]; };
+      std::vector<uint8_t> ipersistent(m_.numValues(), 0);
+      for (const Op& op : m_.init.ops) {
+        if ((op.kind == OpKind::View || op.kind == OpKind::Sync) && !op.results.empty())
+          iroot[op.results[0]] = irootOf(op.operands[0]);
+        if (op.kind == OpKind::BufferAlloc && op.hasFlag("persistent")) ipersistent[op.results[0]] = 1;
+      }
+      const Op& initRet = m_.init.ops.back();
+      for (size_t i = 0; i < r.state.size() && i < initRet.operands.size(); ++i)
+        if (ipersistent[irootOf(initRet.operands[i])]) writable[r.state[i]] = 2;
+    }
+    for (size_t i = 0; i < r.args.size(); ++i) {
+      if (!r.isMutableArg(i)) continue;
+      if (m_.typeOf(r.args[i])->kind != TypeKind::Buffer)
+        return fail("exec argument #" + std::to_string(i) + " is mutable but not a buffer");
+      writable[r.args[i]] = 1;
+    }
+    for (const Op& op : r.ops) {
+      if ((op.kind == OpKind::View || op.kind == OpKind::Sync) && !op.results.empty())
+        root[op.results[0]] = rootOf(op.operands[0]);
+      if (op.kind == OpKind::BufferAlloc && op.hasFlag("persistent")) writable[op.results[0]] = 2;
+      if (op.kind == OpKind::Kernel)
+        if (const Attr* io = op.attr("inout"))
+          for (int64_t j : std::get<Attr::Ints>(io->value)) {
+            if (j < 0 || static_cast<size_t>(j) >= op.operands.size()) return failOp(op, "inout index out of range");
+            if (!writable[rootOf(op.operands[j])])
+              return failOp(op, "writes operand #" + std::to_string(j) +
+                                " in place, but it is neither a mutable input nor persistent state (an immutable "
+                                "input or a temporary): declare the input mutable");
+          }
+      if (op.kind == OpKind::Return)
+        for (ValueId v : op.operands)
+          if (writable[rootOf(v)])
+            return failOp(op, std::string("returns ") + (writable[rootOf(v)] == 1 ? "a mutable input" : "persistent state") +
+                                  " (or a view of it): it can't also be a caller-owned output; return a copy");
+    }
+    return Status::ok();
   }
 
   Status fail(std::string msg) { return Status::error("verify: " + msg); }

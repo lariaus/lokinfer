@@ -1,0 +1,19 @@
+// RUN: not lokinfer-opt --pass=bufferize %s 2>&1 | filecheck %s
+
+// (The verifier catches this first, at load; bufferize keeps the same check as a backstop.)
+
+// Persistent state (a KV cache written in place by an inout kernel) can't be returned: it would need to be both the
+// model's state and a caller-owned output. Bufferize used to replace it by a fresh output alloc, so the cache lost
+// its contents on every call; now it is an error.
+// CHECK: returns persistent state (or a view of it): it can't also be a caller-owned output; return a copy
+model {
+  init {
+    return
+  }
+  exec(%in0_1: tensor<f32[1, 12]>, %in1_2: tensor<i64[1]>) -> buffer<f32[8, 4]> {
+    %p3 = buffer.alloc {device = "cpu", persistent = true} : buffer<f32[8, 4]>
+    %p4 = buffer.alloc {device = "cpu", persistent = true} : buffer<f32[8, 4]>
+    kernel "kv_write_rows_f32_cpu"(%p3, %p4, %in0_1, %in1_2) {inout = [0, 1]}
+    return %p3
+  }
+}

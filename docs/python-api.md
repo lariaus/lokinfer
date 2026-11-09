@@ -63,6 +63,15 @@ persist across calls (uninitialized at first). `inout` kernels write it in place
 GPT-2's decode step keeps one K and one V cache per layer this way (`models/gpt2.py::build_decode`). The state belongs
 to the compiled model: two compiled models don't share it.
 
+## Mutable inputs (caller-owned KV caches) [built 2026-11-05]
+
+`input_types=[..., lk.MutableType(dtype, shape)]` makes an input a **mutable input**: the caller's buffer, written in
+place by `inout` kernels (e.g. `ops.kv_write_rows_f32_cpu`, `ops.f16.kv_write`, `ops.f16_gpu.kv_write_f16_gpu`),
+never an output. It is bound with no copy and no conversion: numpy arrays must be C-contiguous and writeable,
+torch tensors contiguous; GPU models wrap it in place (a lokinfer GPU tensor or any owned CPU memory). A binding
+that would need a copy, or a mutable input overlapping another input, is an error. Qwen3-ASR's generate model takes
+its KV cache this way (`models/qwen3_asr/model.py` `kv_cache`): the caller sizes it and keeps it between calls.
+
 ## Mixed CPU and GPU graphs [built]
 
 Devices are explicit in the graph (user decision 2026-11-01). Captured constants live on their tensor's device
@@ -84,7 +93,26 @@ from lokinfer.remote import RemoteDevice   # run on the iPhone test host (script
 dev = RemoteDevice.connect(f"{udid}.coredevice.local")
 mid = dev.load(model)                          # cached on the device by sha256
 outs, times_ns = dev.run(mid, [x], warmup=3, iters=20)
+
+kv = dev.alloc_tensor(np.float16, (28, 2, cap, 1024))  # a device tensor: zeroed, lives on the device
+outs, stats, times_ns = dev.run2(mid, [ids, audio, pos, kv])  # bound in place; the model writes it on the device
+dev.read_tensor(kv); dev.write_tensor(kv, a)   # transfers only when asked
+dev.free_tensor(kv)
+
+dev.blobs()                                    # the device's blob store: {"count", "bytes"} (feature "blobs")
+dev.stored_blobs(shas)                         # [bool] per sha256, one round trip ("blobs_query")
+dev.remove_blobs(shas); dev.clear_blobs(keep=shas)   # prune it (removed weights are re-sent on the next load)
 ```
+
+A model's mutable inputs must be device tensors on a remote device (an inline array is refused: its writes would
+land in a copy). Real iPhone use (benchmarks, Qwen3-ASR transcription) keeps the KV cache on the device this way and
+never transfers it (0.76 GB at the iPhone's capacity). The test suite's `--device=iphone` / `serve` routing of
+`CompiledModel.__call__` (tests/conftest.py) handles mutable inputs transparently instead: a device mirror per
+mutable argument, written only when the caller's array changed (content digest), then read back into the caller's
+own memory after the call — exact, but each call still reads the whole input back, so only for tests with small
+caches. A broken session (server crash) is reconnected before the next test (`dev.reconnect()`, same object), and each
+test's models are freed when it ends (`dev.free_model(id)`, feature "free_model"): a long `--device=iphone` run used to
+keep them all until disconnect and iOS killed LokiHost. `dev.load(model)` splits a `CompiledModel` in memory (graph skeleton + one blob per weight, no .lkm written).
 
 ## Calls: outputs, async, export [built 2026-11-02]
 

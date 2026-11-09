@@ -46,13 +46,13 @@ GpuContext::~GpuContext() {
   commitAndWait();
   for (auto& [n, p] : pipelines_) p->release();
   if (counterHeap_) static_cast<MTL4::CounterHeap*>(counterHeap_)->release();
-  if (commitOptions_) commitOptions_->release();
   for (SegSlot& sl : slots_) {
     sl.params->release();
     sl.cmd->release();
     sl.allocator->release();
   }
   if (table_) table_->release();
+  if (sentinel_) sentinel_->release();
   if (queue_) queue_->release();
   if (event_) event_->release();
   if (residency_) residency_->release();
@@ -95,20 +95,36 @@ Expected<std::unique_ptr<GpuContext>> GpuContext::create() {
     return Status::error("failed to create Metal 4 objects");
   }
   g->queue_->addResidencySet(g->residency_);
+  g->sentinel_ = g->device_->newBuffer(2 * kSentinelSlots * sizeof(uint32_t),
+                                       MTL::ResourceStorageModeShared | MTL::ResourceHazardTrackingModeUntracked);
+  if (!g->sentinel_) return Status::error("failed to create the GPU sentinel buffer");
+  std::memset(g->sentinel_->contents(), 0, 2 * kSentinelSlots * sizeof(uint32_t));
+  g->residency_->addAllocation(g->sentinel_);
+#if TARGET_OS_IPHONE
+  g->workBudget_ = 2e11;  // ~0.1 s per command buffer at the A20 GPU's ~2.4 TF/s (Qwen3-ASR f16 GEMMs, 2026-11-06)
+#endif
+  if (const char* e = std::getenv("LOKINFER_GPU_WORK_BUDGET_GFLOP")) g->workBudget_ = std::atof(e) * 1e9;
   // Commit feedback: a failed command buffer (GPU fault / timeout / OOM) is recorded so waits don't hang on an event
   // it will never signal, and the call returns the error.
-  g->commitOptions_ = MTL4::CommitOptions::alloc()->init();
-  GpuContext* self = g.get();
-  g->commitOptions_->addFeedbackHandler([self](MTL4::CommitFeedback* fb) {
+  // The handler is attached to a fresh MTL4::CommitOptions for EVERY commit (endAndCommit): measured 2026-11-05, an
+  // options object reused across commits delivered feedback for its first commit only, so every later GPU failure
+  // was silent (zeros returned as success).
+  GpuContext* selfp = g.get();
+  g->onFeedback_ = [selfp](MTL4::CommitFeedback* fb) {
     NS::Error* e = fb ? fb->error() : nullptr;
-    if (!e) return;
-    std::lock_guard<std::mutex> lock(self->gpuErrorMu_);
-    if (self->gpuError_.empty()) {
-      const char* d = e->localizedDescription() ? e->localizedDescription()->utf8String() : nullptr;
-      self->gpuError_ = std::string("GPU command buffer failed: ") + (d ? d : "unknown error");
+    std::lock_guard<std::mutex> lock(selfp->gpuErrorMu_);
+    if (e) {
+      if (selfp->gpuError_.empty()) {
+        const char* d = e->localizedDescription() ? e->localizedDescription()->utf8String() : nullptr;
+        selfp->gpuError_ = std::string("GPU command buffer failed: ") + (d ? d : "unknown error");
+        if (e->code() == 1)  // MTL4CommandQueueErrorTimeout: the GPU stopped a command buffer that ran too long
+          selfp->gpuError_ += " (GPU timeout: a kernel ran too long; split the work into shorter dispatches)";
+      }
+      selfp->gpuFailed_ = true;
     }
-    self->gpuFailed_ = true;
-  });
+    selfp->feedbacks_.fetch_add(1, std::memory_order_release);
+    selfp->feedbackCv_.notify_all();
+  };
   g->paramsCapacity_ = kParamsCapacity;
   // Command buffers that may exist at once (docs/runtime.md). macOS: 2 (one in flight while the next is encoded;
   // interleaved A/B 2026-11-02: Kokoro app59f GPU 50.7 -> 50.1 ms, GPT-2 prefill T=128 5.04 -> 4.90, decode
@@ -208,6 +224,8 @@ MTL4::ComputeCommandEncoder* GpuContext::beginDispatch() {
     tableDirty_ = false;
   }
   if (dispatchesInEncoder_ > 0 && nextBarrier_)
+    // after every earlier dispatch of this command buffer (a failed buffer is aborted before reaching it); each
+    // buffer carries its own marker, so no queue-wide barrier is needed
     encoder_->barrierAfterEncoderStages(MTL::StageDispatch, MTL::StageDispatch, MTL4::VisibilityOptionNone);
   lastBarrier_ = nextBarrier_;
   nextBarrier_ = true;
@@ -256,7 +274,41 @@ void GpuContext::dispatchThreadgroups(MTL::ComputePipelineState* pso, uint64_t g
   if (profiling_) profileLogDispatch(pso, gx, gy, gz, tx, ty, tz, true);
 }
 
+void GpuContext::encodeSentinel() {
+  if (!sentinelPso_) sentinelPso_ = pipeline("lk_runtime_sentinel");
+  if (!sentinelPso_) return;  // no metallib function: fall back to the feedback wait (checkSentinels)
+  const uint32_t slot = static_cast<uint32_t>(segmentId_ % kSentinelSlots);
+  const uint32_t marker = static_cast<uint32_t>(segmentId_ + 1) | 1u;  // never 0 (the buffer starts zeroed)
+  static_cast<uint32_t*>(sentinel_->contents())[slot] = marker;  // request, visible to the GPU at commit
+  if (!encoder_) {
+    encoder_ = cmd_->computeCommandEncoder();
+    encoder_->setArgumentTable(table_);
+  } else {
+    // after every earlier dispatch of this command buffer (a failed buffer is aborted before reaching it); each
+    // buffer carries its own marker, so no queue-wide barrier is needed
+    encoder_->barrierAfterEncoderStages(MTL::StageDispatch, MTL::StageDispatch, MTL4::VisibilityOptionNone);
+  }
+  table_->setAddress(sentinel_->gpuAddress() + slot * sizeof(uint32_t), 0);
+  table_->setAddress(sentinel_->gpuAddress() + (kSentinelSlots + slot) * sizeof(uint32_t), 1);
+  encoder_->setArgumentTable(table_);
+  tableDirty_ = true;  // the next dispatch re-sets its own bindings
+  encoder_->setComputePipelineState(sentinelPso_);
+  encoder_->dispatchThreads(MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
+  pendingSentinels_.emplace_back(slot, marker);
+}
+
+void GpuContext::checkSentinels() {
+  const auto* res = static_cast<const volatile uint32_t*>(sentinel_->contents()) + kSentinelSlots;
+  bool ok = sentinelPso_ != nullptr;
+  for (auto [slot, marker] : pendingSentinels_)
+    if (res[slot] != marker) ok = false;
+  pendingSentinels_.clear();
+  if (!ok) waitFeedback();  // a marker is missing: a buffer failed (or no sentinel): wait for its error
+}
+
 void GpuContext::endAndCommit() {
+  workEncoded_ = 0;
+  encodeSentinel();
   if (encoder_) {
     encoder_->endEncoding();
     encoder_ = nullptr;
@@ -264,10 +316,22 @@ void GpuContext::endAndCommit() {
   cmd_->endCommandBuffer();
   commitResidency();
   const MTL4::CommandBuffer* cbs[1] = {cmd_};
-  queue_->commit(cbs, 1, commitOptions_);
+  commits_.fetch_add(1);
+  MTL4::CommitOptions* opts = MTL4::CommitOptions::alloc()->init();
+  opts->addFeedbackHandler(onFeedback_);
+  queue_->commit(cbs, 1, opts);
+  opts->release();
   queue_->signalEvent(event_, ++eventValue_);
   cmdOpen_ = false;
   ++segmentId_;
+}
+
+void GpuContext::addWork(double flops) {
+  if (workBudget_ <= 0 || !cmdOpen_) return;
+  workEncoded_ += flops;
+  if (workEncoded_ < workBudget_) return;
+  if (recorder_) recorderFail("work budget commit mid-call");
+  commitAsync();
 }
 
 void GpuContext::commitAsync() {
@@ -300,6 +364,19 @@ void GpuContext::waitEvent(uint64_t value) {
       return;
     }
   }
+}
+
+void GpuContext::waitFeedback() {
+  // Only on the failure path (checkSentinels found a missing marker): feedback follows completion by ~50 us; spin
+  // briefly, then block; the bound guards a feedback that never comes.
+  const uint64_t want = commits_.load();
+  const auto spinUntil = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
+  while (feedbacks_.load(std::memory_order_acquire) < want)
+    if (std::chrono::steady_clock::now() > spinUntil) {
+      std::unique_lock<std::mutex> lock(gpuErrorMu_);
+      feedbackCv_.wait_for(lock, std::chrono::seconds(10), [&] { return feedbacks_.load() >= want; });
+      return;
+    }
 }
 
 std::string GpuContext::takeGpuError() {
@@ -371,6 +448,7 @@ void GpuContext::commitAndWait() {
   std::lock_guard<std::recursive_mutex> lock(mu_);
   if (!cmdOpen_) {
     waitInflight();
+    checkSentinels();  // every committed buffer's outcome is known before the caller checks takeGpuError
     if (segmentPool_) {
       static_cast<NS::AutoreleasePool*>(segmentPool_)->release();
       segmentPool_ = nullptr;
@@ -380,6 +458,7 @@ void GpuContext::commitAndWait() {
   endAndCommit();
   waitEvent(eventValue_);
   waitInflight();  // everything committed earlier completed too
+  checkSentinels();  // the event can signal before a failed buffer's feedback arrives: markers tell success at once
   for (MTL::Allocation* b : pendingRelease_) {
     residency_->removeAllocation(b);
     residencyDirty_ = true;
@@ -392,6 +471,12 @@ void GpuContext::commitAndWait() {
     static_cast<NS::AutoreleasePool*>(segmentPool_)->release();
     segmentPool_ = nullptr;
   }
+}
+
+void GpuContext::trim() {
+  std::lock_guard<std::recursive_mutex> lock(mu_);
+  commitAndWait();
+  commitResidency();
 }
 
 MTL::Buffer* GpuContext::wrapNoCopy(void* data, size_t size) {

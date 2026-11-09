@@ -1,0 +1,13 @@
+// RUN: not lokinfer-opt %s 2>&1 | filecheck %s
+
+// A mutable input stays the caller's: it can't also be returned as an output.
+// CHECK: returns a mutable input (or a view of it)
+model {
+  init {
+    return
+  }
+  exec(%kc: buffer<f32[8, 4]> mutable, %vc: buffer<f32[8, 4]> mutable, %q: tensor<f32[1, 12]>, %p: tensor<i64[1]>) -> buffer<f32[8, 4]> {
+    kernel "kv_write_rows_f32_cpu"(%kc, %vc, %q, %p) {inout = [0, 1]}
+    return %kc
+  }
+}

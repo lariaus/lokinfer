@@ -33,6 +33,16 @@ from another kernel in the project) and from the 2026-11-01 plan review.
    match HF `generate` token for token.
 6. **Speed-regression tests [built: Kokoro; planned: other models]** — `tests/perf/`, see `docs/benchmarking.md`.
 
+## Test tiers [built 2026-11-05]
+
+Plain `pytest` runs the **default tier**: fast, and it still covers every code path. Tests marked `slow` run with
+`--run-slow` (or `LOKINFER_RUN_SLOW=1`): the milestone tier. Tests marked `long` run with `--run-long`
+(`LOKINFER_RUN_LONG=1`, implies `--run-slow`): the release tier, minutes to an hour. Qwen3-ASR's model tests use all
+three: default = 2 s, 10 s, the padding clip, a 1-row last encoder window and silence (~1-2 min per device); slow = the
+other clips up to 111 s and the 300 s encoder / prefill and teacher-forced passes; long = the 20 min ones (slow on the basic kernels by
+design: run it on the optimized ones). Add longer contexts to slow / long, not new code paths: those belong in the
+default tier.
+
 ## Rules
 
 - **Test through graphs, not kernels in isolation.** The runtime overhead is ~320 ns per one-kernel graph call (LPM off, 2026-11-02), so a
@@ -64,6 +74,31 @@ from another kernel in the project) and from the 2026-11-01 plan review.
   made the server allocate 2 GiB before reading anything; dtype values ≥ 256 wrapped to F32 before the range check; a
   0-d tensor's byte count was not checked against its dtype.
 
+## Model-level f16 rules (Qwen3-ASR) [built 2026-11-06]
+
+A low-precision (f16) model can't be compared with a float64 reference element by element: f16 rounding noise,
+amplified through dozens of layers, is the expected error. `tests/models/test_qwen3_asr.py` measures lokinfer against
+G-f16w (float64 on the f16-rounded weights) and bounds it by **torch f16's own error on the same quantity** (plus an
+absolute floor of 2e-4 on each relative-error bound: torch f16 can be lucky on a tiny case), with each quantity
+checked for what it can reliably show. Every output must also be finite (no NaN / inf).
+
+| quantity | rule | catches |
+|---|---|---|
+| encoder output, LM final normed hidden state of every prompt row (`lm_norm`) | RMS rel. error ≤ 2× torch's and max ≤ 4× torch's | systematic precision loss (an f16 accumulation, a wrong rounding), a gross local error (a wrong chunk / row) |
+| logits (prefill's last row; the long passes' 16 sampled positions) | argmax = G-f16w's unless G-true's top-2 gap < 0.05; RMS ≤ 4× torch's per row; pooled RMS over the 16 positions ≤ 2× torch's | functional errors (a wrong RoPE angle, a wrong mask) |
+| transcripts (clips ≤ 111 s) | greedy tokens = G-true's, first difference allowed only at a near-tie | anything that changes the output |
+
+Why not "max element error ≤ 2× torch's" (the first rule): it is a lottery. Four equally precise CPU encoder variants
+gave a 111 s worst row of 8.3e-3 … 2.26e-2 vs torch's 9.5e-3 (RMS 1.8–2.4e-3 vs 2.1e-3, p50 / p90 / p99 below
+torch's). Why not RMS on logits alone: one row of logits is ill-conditioned: hidden states as accurate as torch's
+(layer 27: CPU 3.05e-3, GPU 3.15e-3, torch 2.80e-3) gave last-row logit RMS of 1.6e-3 … 6.4e-3 depending on the
+direction of their tiny errors (2026-11-06 investigation; CPU prefill bit-deterministic).
+
+Power, checked with injected faults (2026-11-06, GPU): weights perturbed at bf16 precision (×(1 ± 2⁻⁹)) fail the
+encoder rule at 300 s; RoPE θ off by 1 % fails the logit rules at 300 s (aggregate hidden-state statistics can't see
+it: 2.90e-2 vs torch's 2.49e-2); one-ulp f16 weight noise (2⁻¹¹) passes, as it should. Short clips (10 s) pass all
+three faults: short positions barely move under them, the long clips are the ones that show them.
+
 ## On the iPhone [built; run on the phone 2026-11-02]
 
 `scripts/ios_deploy.sh` runs the C++ suite on the phone and then keeps the remote executor up.
@@ -72,7 +107,9 @@ from another kernel in the project) and from the 2026-11-01 plan review.
 the UDID comes from `LOKINFER_IPHONE` or `devicectl`). Every compiled graph — `CompiledModel.__call__`, which also
 serves eager kernel calls — runs on the phone through the remote executor: the model is uploaded once by content
 hash, and the phone's outputs are what the test asserts on (they are written into the result tensors the same graph
-produces on the Mac, so tests see ordinary `lokinfer.Tensor`s). A test that ran no graph on the phone (tensor
+produces on the Mac, so tests see ordinary `lokinfer.Tensor`s). Mutable inputs (`lk.MutableType`, KV caches) go
+through a device tensor per call — written, run in place, read back into the caller's own array, freed — so the
+caller sees the device's writes exactly as on the Mac (slow; small caches only) [2026-11-05]. A test that ran no graph on the phone (tensor
 interop, save/load, registry) is reported **skipped**, never passed; `tests/tools` and `tests/perf` are Mac-only.
 References stay on the Mac (PyTorch, float64 numpy, `~/.cache/lokinfer/<model>/ref/`). First phone run
 (2026-11-02): sweeps + remote + MobileNetV2 + MNIST + GPU depthwise 62 passed / 1 skipped (Mac-only), Kokoro app59f

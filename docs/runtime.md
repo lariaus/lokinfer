@@ -73,6 +73,11 @@ as a shared-storage `MTLBuffer` (unified memory: CPU and GPU see the same bytes)
   no owner) is copied, because the runtime couldn't keep it mapped. The remote executor (`lokinfer-serve`, LokiHost)
   copies a RUN's inputs once into owned page-aligned memory before its timed calls, so they are wrapped like a
   Python caller's (before 2026-11-02 every timed iPhone GPU call copied them: MNIST B=1024, 3.2 MB per call).
+  Its **device tensors** (`ALLOC_TENSOR`; RUN2 input kind 3) are owned page-aligned memory too, bound with no copy
+  at all: the view points at the device tensor, with its owner, so a GPU model wraps it once and keeps the wrap
+  across calls. A mutable input (`buffer<...> mutable`, e.g. Qwen3-ASR's KV cache) must be one: RUN / RUN2 refuse
+  any other input for a mutable arg ("input i is mutable: pass a device tensor") instead of running it on a copy
+  whose writes would be lost [built 2026-11-05].
 
 Releasing a GPU buffer while a segment is open is deferred until that segment completes (no commit + wait mid-call).
 Buffers only GPU kernels touch are planned in their own arena by the compiler (`gpu_only`, `docs/passes/bufferize.md`),
@@ -83,6 +88,11 @@ which keeps Kokoro's GPU arenas small (rand510 7.7 GB → 0.7 GB).
 - There is one process-wide context: device, `MTL4CommandQueue`, one argument table, one residency set holding
   every buffer, and **segment slots** (each a command allocator, a command buffer and a parameter ring buffer:
   Metal 4 has no `setBytes`; 2 on macOS and iOS).
+- **Residency commits** [built 2026-11-06]: wrap / release only mark the residency set dirty; it is committed at the
+  next encode. An uncommitted removal keeps the allocation alive, so `GpuContext::trim()` (commitAndWait + commit
+  the set) must follow big frees outside a run: the remote server calls it when a client disconnects and on
+  FREE_TENSOR. Before, a freed Qwen3-ASR model's 3.6 GB stayed allocated until the next GPU call (on the iPhone,
+  through a following CPU-only session).
 - **Thread safety** [built 2026-11-03]: the context is one shared encoder, guarded by a recursive mutex.
   `Executable::run` of a GPU executable holds it for the whole call; `commitAndWait`, buffer wrap/release and
   pipeline lookup take it themselves. So calls of different models (or `submit()` on a worker thread plus
@@ -105,10 +115,28 @@ which keeps Kokoro's GPU arenas small (rand510 7.7 GB → 0.7 GB).
 - **GPU failures** [built 2026-11-02]: every commit carries a Metal 4 commit-feedback handler; a command buffer
   that fails (GPU fault, timeout, out of memory) is recorded, waits stop blocking on the event it would never
   signal, and the call (or the next `sync gpu_to_cpu`, before any CPU kernel reads its results) returns
-  `GPU command buffer failed: ...` instead of hanging the process.
+  `GPU command buffer failed: ...` instead of hanging the process. A timeout (Metal error 1) gets a hint (split the
+  work: smaller chunks / fewer rows per call).
+  **Each commit gets a fresh `MTL4::CommitOptions`** [fixed 2026-11-05]: a reused options object delivered feedback
+  for its first commit only, so every later failure was silent and the call returned zeros as a success.
+  **Sentinel** [2026-11-05, user's choice: correct per call, no latency]: the completion event can signal ~50 µs
+  before a failed buffer's feedback arrives. The last dispatch of every command buffer, `lk_runtime_sentinel`
+  (`kernels/gpu/elementwise.metal`), copies a per-segment marker into a shared 4096-slot buffer. A failed buffer is
+  aborted before reaching it, so after the event wait, `commitAndWait` checks the markers: all present, success with
+  no wait; one missing, it waits for that buffer's feedback (spin, then a bounded block), so the error belongs to
+  the call that caused it. Cost ≈ 0.01 ms per call (GPT-2 decode 2.05 vs 2.04 ms); a per-call feedback wait cost
+  +0.05 ms (2.5 %).
 - **Barriers**: before each GPU kernel, the executable compares its read and write **byte ranges** with those of
   the dispatches since the last barrier. It inserts a barrier only on a RAW, WAW or WAR conflict. Independent
   dispatches run concurrently.
+  The tracker resets with each new segment (command buffer), and the first kernel of a new segment always gets a
+  barrier [fixed 2026-11-06]: a commit inside a kernel (work budget, params ring full) puts that kernel's later
+  dispatches into the new buffer, where the next kernel would otherwise race them.
+- **GPU work budget** [built 2026-11-06, iOS]: heavy kernels report their FLOPs (`GpuContext::addWork`: the steel
+  GEMMs, prefill and window attention); once the open command buffer holds more than the budget (iPhone 2e11 FLOPs
+  ≈ 0.1 s; none on the Mac; `LOKINFER_GPU_WORK_BUDGET_GFLOP` overrides), it is committed. iOS aborts command buffers
+  that run too long (`MTL4CommandQueueErrorDomain` 1): a 1473-row Qwen3-ASR prefill had ~0.6 s of GPU work per
+  buffer when only the params ring split them. Decode GEMVs report ~no work, so decode gets no extra commits.
 - **Metal 4 command buffers don't retain resources.** Library kernels (MPS) hand their temporary objects to
   `GpuContext::keepAlive`, and the segment holds an autorelease pool until completion. Without this, MPS crashed
   after encoding.
@@ -184,6 +212,29 @@ freed at last use). The iPhone CPU app59f peak (542 MiB) is a transient of the f
 both), not seen on the Mac — not investigated further. Everything is far below the phone's limit (LokiHost has the
 increased-memory-limit entitlement).
 
+## Memory pressure (remote executor) [built 2026-11-07]
+
+Under system memory pressure iOS reclaims the cheapest memory first: clean file-backed pages, i.e. a CPU model's
+memory-mapped weights, which then come back from flash at the next step (Qwen3-ASR's CPU decode: 2-3 s steps, then a
+`fc-thrashing` jetsam; docs/models/qwen3-asr.md "Memory under pressure"). The executor makes that visible and
+optionally prevents it:
+
+- **MEMORY** (feature `memory_pressure`) adds `available` (`os_proc_available_memory()`: bytes before this app's
+  jetsam limit; iOS only, -1 on macOS), `pressure` (the last level of a process-wide `DISPATCH_SOURCE_TYPE_MEMORYPRESSURE`
+  source: normal / warn / critical; it only fires on transitions) and `pressure_events`, `pageins`
+  (`task_events_info`: a weight re-read from flash is a page-in; a warm timed region has none), `weights` /
+  `weights_resident` / `weights_locked` (the loaded models' mapped constants, `mincore`), `system_free` /
+  `_file_backed` / `_compressor` / `_wired` (`host_statistics64`). `RemoteDevice.memory_check()` = (pressure is
+  normal, a one-line summary). The iPhone Qwen bench never records a case that starts or ends under pressure or
+  pages in more than the weights; the test harness prints a warning at connect.
+- **PIN_MODEL** (feature `pin_model`), per model: `willneed` (madvise read-ahead, no protection), `lock` (mlock: works
+  on iOS, but wired pages are charged to `phys_footprint`, i.e. against the app's limit, and on the Mac the footprint
+  stays after munlock), `gpu` (no-copy MTLBuffers over the constant pages in a residency set of their own, committed
+  + `requestResidency()`: not charged to the footprint on the Mac, but charged like mlock on iOS (Qwen3-ASR: +3.2
+  GB); the GPU graphs' weights are held for free only by the queue's own set while GPU work runs), `unlock`. All or nothing; the pins go with FREE_MODEL / disconnect
+  (before the mappings). Not on by default in the runtime; the iPhone Qwen bench pins its CPU graphs ("gpu": 0
+  page-ins under pressure, no speed cost in an alternating A/B; on iOS the footprint grows by the weights' size).
+
 ## CPU kernels and the thread pool [built]
 
 `rt::ThreadPool::global()` (`src/runtime/thread_pool.cpp`): persistent workers at `QOS_CLASS_USER_INTERACTIVE`, sized
@@ -220,8 +271,11 @@ binary archives) as `GPU_INSPECT`. Tools and formats: [profiling.md](profiling.m
 The `.lkm` loader and the remote executor (the iPhone test host listens on the network) treat their bytes as
 hostile: overflow-safe bounds, validated enums, ids and constant sizes, frame-size caps (and a payload buffer that
 grows as bytes arrive, never to the claimed size up front), tensor shape ↔ byte-count checks, Metal function names
-restricted to identifiers, and `verifyModel` before any model is executed. The protocol is fuzzed in the unit
-suite (`tests/unit/test_remote_fuzz.cpp`, docs/correctness-testing.md).
+restricted to identifiers, and `verifyModel` before any model is executed. Device tensors are capped (4 GiB of
+live device tensors, at most 4096, each ≤ the 2 GiB frame cap so READ_TENSOR fits one reply; memory is anonymous
+pages, zeroed, committed only when touched), handles are looked up (an unknown or freed handle is an error), and a
+WRITE_TENSOR must match the device tensor's dtype and shape exactly with no trailing bytes. The protocol is fuzzed in
+the unit suite (`tests/unit/test_remote_fuzz.cpp`, docs/correctness-testing.md).
 The executor serves one client at a time; a client that disappears without closing (Mac asleep, USB tunnel reset)
 is detected by TCP keepalive (~25 s: 10 s idle, 3 probes 5 s apart) and the next client is accepted, and writes to
 a closed client fail instead of raising SIGPIPE (`SO_NOSIGPIPE`) [built 2026-11-03].
